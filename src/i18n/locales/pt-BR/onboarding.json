@@ -1,8 +1,11 @@
 {
-  "welcome": "Boas-vindas", "godot_versions": "Versões do Godot", "categories": "Categorias",
-  "customize": "Personalizar", "finish": "Concluir", "in_progress": "Em andamento",
-  "prototypes": "Protótipos", "finished": "Concluídos", "game_jams": "Game jams",
+  "welcome": "Boas-vindas", "godot_versions": "Versões do Godot", "categories": "Categorias", "customize": "Personalizar", "finish": "Concluir",
+  "in_progress": "Em andamento", "prototypes": "Protótipos", "finished": "Concluídos", "game_jams": "Game jams",
   "project_folders": "Pastas de projetos", "version_folders": "Pastas de versões",
-  "welcome_title": "Boas-vindas ao GodotHub", "welcome_desc": "Um lugar para todos os seus projetos e versões do Godot. Vamos configurar algumas coisas; você poderá alterá-las depois.",
-  "language_title": "Escolha seu idioma", "language_desc": "Selecione o idioma do GodotHub. Você poderá alterá-lo mais tarde nas Configurações.", "language_heading": "Idioma"
+  "welcome_title": "Boas-vindas ao GodotHub", "welcome_desc": "Um lugar para todos os projetos e versões do Godot neste computador. Vamos configurar algumas opções; tudo poderá ser alterado mais tarde nas Configurações.",
+  "onboard_empty_projects": "Nenhuma pasta adicionada ainda. O GodotHub não encontrará projetos existentes até que você adicione uma, mas também poderá adicioná-los manualmente depois.",
+  "onboard_empty_versions": "Nenhuma pasta adicionada ainda. Novos downloads do Godot usarão a pasta de dados do aplicativo, a menos que você defina uma abaixo.",
+  "onboard_no_template_folder": "Nenhuma pasta definida. Você poderá configurar isso mais tarde nas Configurações ou salvar modelos manualmente.",
+  "onboard_categories_desc": "Nada aqui é obrigatório; projetos sem categoria aparecem como Sem categoria.",
+  "language_title": "Escolha seu idioma", "language_desc": "Selecione o idioma que o GodotHub deve usar. Você poderá alterá-lo mais tarde nas Configurações.", "language_heading": "Idioma"
 }

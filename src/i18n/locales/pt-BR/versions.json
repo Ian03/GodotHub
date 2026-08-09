@@ -1,9 +1,15 @@
 {
-  "standard": "Padrão", "both": "Ambos", "stable": "Estável", "unstable": "Instável",
+  "standard": "Padrão", "mono": "Mono", "both": "Ambos", "stable": "Estável", "unstable": "Instável",
   "rename": "Renomear", "open_editor": "Abrir editor", "open_editor_with_console": "Abrir editor com console",
-  "open_install_folder": "Abrir pasta de instalação", "uninstall": "Desinstalar", "type": "Tipo",
-  "channel": "Canal", "fetching": "Buscando versões…", "fetch_error": "Não foi possível buscar as versões disponíveis.",
-  "importing_version": "Importando versão…", "scanning_versions": "Procurando versões…", "import": "Importar",
-  "scanning": "Procurando…", "scan_now": "Procurar agora", "installed_title": "VERSÕES INSTALADAS",
-  "available_title": "VERSÕES DISPONÍVEIS", "open": "Abrir", "install": "Instalar", "retry": "Tentar novamente"
+  "more_editor_launch_options": "Mais opções de inicialização do editor", "open_install_folder": "Abrir pasta de instalação",
+  "uninstall": "Desinstalar", "type": "Tipo", "channel": "Canal", "fetching": "Buscando versões…",
+  "fetch_error": "Não foi possível buscar as versões disponíveis.", "importing_version": "Importando versão…",
+  "scanning_versions": "Procurando versões…", "importing_progress": "Importando {{current}}/{{total}}…",
+  "importing": "Importando…", "import": "Importar", "scanning": "Procurando…", "scan_now": "Procurar agora",
+  "other": "Outro", "paused_dot": "Pausado · ", "choose_version": "Escolher versão",
+  "installed_title": "VERSÕES INSTALADAS", "available_title": "VERSÕES DISPONÍVEIS",
+  "available_subtitle": "Obtidas das builds oficiais do Godot.", "no_versions_match": "Nenhuma versão instalada corresponde",
+  "open": "Abrir", "retry": "Tentar novamente", "install": "Instalar", "show_more": "Mostrar mais",
+  "mb": "MB", "queued": "Na fila…", "resume_download": "Retomar download", "pause_download": "Pausar download",
+  "cancel_download": "Cancelar download", "installed_label": "Instalado"
 }
