@@ -19,7 +19,7 @@
   "github_token_title": "GitHub API Token",
   "github_token_desc": "Optionally set a GitHub personal access token to increase the API rate limit from 60 to 5,000 requests per hour when fetching available Godot versions. No scopes/permissions needed.",
   "titlebar_buttons": "Titlebar Buttons",
-  "titlebar_buttons_desc": "Show or hide the \"Support\" and \"Star on GitHub\" buttons in the titlebar.",
+  "titlebar_buttons_desc": "Show or hide the GitHub button in the titlebar.",
   "setup_wizard": "Setup Wizard",
   "setup_wizard_again": "Run Setup Wizard Again",
   "reset_settings": "Reset Settings",

@@ -6,5 +6,9 @@
   "language_label": "Idioma", "settings_title": "CONFIGURAÇÕES", "settings_subtitle": "Locais de armazenamento, pastas de busca automática e aparência.",
   "saving": "Salvando…", "saved": "Salvo!", "reset": "Restaurar", "lucky": "Sortear", "feeling_lucky": "Estou com sorte",
   "new_ui_label": "Nova interface", "new_ui_desc": "Ativa a interface experimental. Algumas áreas ainda estão instáveis.",
-  "new_ui_tooltip": "Recurso beta; esta interface pode apresentar instabilidade."
+  "new_ui_tooltip": "Recurso beta; esta interface pode apresentar instabilidade.",
+  "titlebar_buttons": "Botões da barra de título",
+  "titlebar_buttons_desc": "Mostra ou oculta o botão do GitHub na barra de título.",
+  "show_star_label": "Mostrar botão do GitHub",
+  "star": "GitHub"
 }

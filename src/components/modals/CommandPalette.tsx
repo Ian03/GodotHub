@@ -260,7 +260,6 @@ export const SETTINGS_SEARCH_ITEMS: SettingSearchEntry[] = (
   { key: 'reset_settings', tab: 'advanced' },
   { key: 'delete_app_data', tab: 'advanced' },
   { key: 'check_updates', tab: 'advanced' },
-  { key: 'show_support_button', tab: 'advanced' },
   { key: 'show_star_button', tab: 'advanced' },
   { key: 'show_scrollbars', tab: 'appearance' },
   { key: 'project_icon_opacity', tab: 'appearance' },

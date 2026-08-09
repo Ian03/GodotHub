@@ -3,20 +3,24 @@
 </p>
 
 <h1 align="center">🎮 GodotHub</h1>
-<h3 align="center">The Ultimate Project Manager for Godot Engine</h3>
+<h3 align="center">Edição de fã gratuita para gerenciamento de projetos Godot</h3>
 
 <p align="center">
-  <strong>Manage projects, versions, templates, and Git - all in one place.</strong>
+  <strong>Gerencie projetos, versões, modelos e Git em um só lugar.</strong>
 </p>
 
+> 🇧🇷 **Edição de fã por [Ian03](https://github.com/Ian03).** Este fork é gratuito, não cobra por downloads, não aceita doações e não possui qualquer monetização. Ele inclui interface em português do Brasil e temas adicionais.
+>
+> O projeto oficial, criado e mantido por RykoTheDev, está em [RykoTheDev/GodotHub](https://github.com/RykoTheDev/GodotHub). Esta edição não é afiliada nem substitui o projeto oficial.
+
 <p align="center">
-  <a href="https://github.com/RykoTheDev/godothub/releases/latest">
-    <img src="https://img.shields.io/github/v/release/RykoTheDev/godothub?style=flat-square&label=Latest&color=457ff2" alt="Latest Release">
+  <a href="https://github.com/Ian03/GodotHub/releases/latest">
+    <img src="https://img.shields.io/github/v/release/Ian03/GodotHub?style=flat-square&label=Latest&color=457ff2" alt="Latest Release">
   </a>
   <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-5865f2?style=flat-square" alt="Platforms">
   <img src="https://img.shields.io/badge/Godot-4.x-478cbf?style=flat-square" alt="Godot 4.x">
-  <img src="https://img.shields.io/github/license/RykoTheDev/godothub?style=flat-square&color=23a55a" alt="License">
-  <img src="https://img.shields.io/github/stars/RykoTheDev/godothub?style=flat-square&color=f0b132" alt="Stars">
+  <img src="https://img.shields.io/github/license/Ian03/GodotHub?style=flat-square&color=23a55a" alt="License">
+  <img src="https://img.shields.io/github/stars/Ian03/GodotHub?style=flat-square&color=f0b132" alt="Stars">
   <img src="https://img.shields.io/badge/winget-available-0078D4?style=flat-square&logo=windows&logoColor=white" alt="Winget Available">
 </p>
 
@@ -114,13 +118,6 @@
     <img src="/assets/discord-banner.png" alt="Discord">
   </a>
 </p>
-
-<p align="center">
-  <a href="https://patreon.com/TheRyko" target="_blank" rel="noopener noreferrer">
-    <img src="/assets/patreon-banner.png" alt="Patreon">
-  </a>
-</p>
-
 
 ---
 

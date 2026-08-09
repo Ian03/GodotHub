@@ -1852,16 +1852,6 @@ export function SettingsView({
               <div className="flex items-center gap-4 shrink-0">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <Toggle
-                    checked={current.show_support_button}
-                    onChange={(checked) =>
-                      setField('show_support_button', checked)
-                    }
-                    label={t('show_support_label')}
-                  />
-                  <span className="text-xs text-muted whitespace-nowrap">{t('support_dev_short')}</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <Toggle
                     checked={current.show_star_button}
                     onChange={(checked) =>
                       setField('show_star_button', checked)

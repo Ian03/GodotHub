@@ -7,7 +7,7 @@ import {
 import { motion } from 'framer-motion'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { version } from '../../package.json'
-import { IconStar, IconHeart } from './Icons'
+import { IconStar } from './Icons'
 import { isMac } from '../lib/platform'
 import { TaskTray } from './TaskTray'
 import { Tooltip } from './ui/Tooltip'
@@ -16,7 +16,6 @@ import { useSettings } from '../hooks/useSettings'
 export function TitleBar() {
   const { t } = useTranslation('common')
   const { settings } = useSettings()
-  const showSupport = settings.show_support_button
   const showStar = settings.show_star_button
   const useOsDec = settings.use_os_decorations
   const [appWindow, setAppWindow] = useState<TauriWindow | null>(null)
@@ -95,24 +94,10 @@ export function TitleBar() {
 
       <div className={`flex items-stretch gap-1 ${isMac ? 'pr-3' : ''}`}>
         <div className="flex items-center gap-1 pl-3 pr-5">
-          {showSupport && (
-            <Tooltip content={t('support_dev')} side="bottom">
-              <motion.button
-                onClick={() => openUrl('https://www.patreon.com/cw/TheRyko/membership')}
-                aria-label={t('support_dev')}
-                className="focus-ring cursor-pointer flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-red-500/15 text-red-400 hover:bg-red-500/25 hover:text-red-300 transition-colors text-xs font-medium"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <IconHeart className="w-3.5 h-3.5" />
-                {t('support')}
-              </motion.button>
-            </Tooltip>
-          )}
           {showStar && (
             <Tooltip content={t('star_on_github')} side="bottom">
               <motion.button
-                onClick={() => openUrl('https://github.com/RykoTheDev/GodotHub')}
+                onClick={() => openUrl('https://github.com/Ian03/GodotHub')}
                 aria-label={t('star_on_github')}
                 className="focus-ring cursor-pointer w-7 h-7 flex items-center justify-center rounded-md text-muted/60 hover:text-amber hover:bg-amber/10 transition-colors"
                 whileHover={{ scale: 1.1 }}
