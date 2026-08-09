@@ -26,6 +26,7 @@ function PlaceholderView({
   description: string
   children?: ReactNode
 }) {
+  const { t } = useTranslation('common')
   return (
     <div className="h-full flex flex-col items-center justify-center gap-4 text-center px-10">
       <div className="w-14 h-14 rounded-2xl bg-accent/10 border border-accent-dim/30 flex items-center justify-center text-accent-bright text-lg font-semibold">
@@ -35,14 +36,14 @@ function PlaceholderView({
       <p className="text-sm text-muted max-w-sm leading-relaxed">{description}</p>
       {children}
       <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-1 rounded-md bg-amber/10 text-amber border border-amber/20">
-        New UI · under construction
+        {t('new_ui_under_construction', { ns: 'common' })}
       </span>
     </div>
   )
 }
 
 export function AppNew() {
-  const { t } = useTranslation('nav')
+  const { t } = useTranslation(['nav', 'common'])
   const { workspaces, activeId } = useWorkspaces()
   const { projects } = useProjectsContext()
   const { installed } = useGodotVersionsContext()
@@ -57,10 +58,10 @@ export function AppNew() {
         return (
           <PlaceholderView
             title={t('projects')}
-            description="The redesigned Projects view will live here as its own file in src/ui/new/views/."
+            description={t('new_ui_projects_desc', { ns: 'common' })}
           >
             <span className="text-xs font-mono text-ink bg-raised px-2 py-0.5 rounded-md">
-              {projects.length} projects
+              {t('new_ui_projects_count', { ns: 'common', count: projects.length })}
             </span>
           </PlaceholderView>
         )
@@ -68,10 +69,10 @@ export function AppNew() {
         return (
           <PlaceholderView
             title={t('versions')}
-            description="The redesigned Versions view will live here as its own file in src/ui/new/views/."
+            description={t('new_ui_versions_desc', { ns: 'common' })}
           >
             <span className="text-xs font-mono text-ink bg-raised px-2 py-0.5 rounded-md">
-              {installed.length} installed
+              {t('new_ui_installed_count', { ns: 'common', count: installed.length })}
             </span>
           </PlaceholderView>
         )
@@ -79,35 +80,35 @@ export function AppNew() {
         return (
           <PlaceholderView
             title={t('news')}
-            description="The redesigned News view will live here as its own file in src/ui/new/views/."
+            description={t('new_ui_news_desc', { ns: 'common' })}
           />
         )
       case 'templates':
         return (
           <PlaceholderView
             title={t('templates')}
-            description="The redesigned Templates view will live here as its own file in src/ui/new/views/."
+            description={t('new_ui_templates_desc', { ns: 'common' })}
           />
         )
       case 'asset-store':
         return (
           <PlaceholderView
             title={t('asset_store')}
-            description="The redesigned Asset Store view will live here as its own file in src/ui/new/views/."
+            description={t('new_ui_asset_store_desc', { ns: 'common' })}
           />
         )
       case 'settings':
         return (
           <PlaceholderView
             title={t('settings')}
-            description="The redesigned Settings view will live here as its own file in src/ui/new/views/."
+            description={t('new_ui_settings_desc', { ns: 'common' })}
           />
         )
       case 'changelog':
         return (
           <PlaceholderView
             title={t('changelog')}
-            description="The redesigned Changelog view will live here as its own file in src/ui/new/views/."
+            description={t('new_ui_changelog_desc', { ns: 'common' })}
           />
         )
     }
@@ -118,7 +119,7 @@ export function AppNew() {
       <header className="shrink-0 h-12 px-5 flex items-center gap-3 border-b border-line">
         <span className="font-display font-semibold tracking-tight">GodotHub</span>
         <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-md bg-accent/15 text-accent-bright border border-accent-dim/40">
-          New UI
+          {t('new_ui_badge', { ns: 'common' })}
         </span>
         <span className="ml-auto text-xs text-muted truncate">
           {activeWorkspace}
