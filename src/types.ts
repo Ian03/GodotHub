@@ -271,6 +271,7 @@ export interface AppSettings {
   font_scale: number
   reduce_motion: boolean
   theme_mode: 'dark' | 'light'
+  theme_id: string
   launch_with_console: boolean
   close_on_project_open: boolean
   minimize_to_tray: boolean

@@ -1,0 +1,7 @@
+{
+  "modified": "Modificado", "added": "Adicionado", "deleted": "Excluído", "renamed": "Renomeado", "untracked": "Não rastreado",
+  "close_sidebar": "Fechar painel", "discard": "Descartar", "delete": "Excluir", "remove": "Remover",
+  "commit": "Commit", "committing": "Criando commit…", "pull": "Pull", "push": "Push", "fetch": "Fetch",
+  "branches_title": "Branches", "changes_title": "Alterações", "staged_changes": "Alterações preparadas",
+  "stage_all": "Preparar tudo", "staging": "Preparando…", "retry": "Tentar novamente", "close": "Fechar"
+}

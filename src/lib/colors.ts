@@ -31,6 +31,26 @@ function shift(hex: string, amount: number): string {
 
 export type ThemeMode = 'dark' | 'light'
 
+export interface ThemePreset {
+  id: string
+  name: string
+  mode: ThemeMode
+  accent: string
+  background: string
+}
+
+export const THEME_PRESETS: ThemePreset[] = [
+  { id: 'godot-dark', name: 'Godot Dark', mode: 'dark', accent: '#478cbf', background: '#15171c' },
+  { id: 'godot-light', name: 'Godot Light', mode: 'light', accent: '#478cbf', background: '#f6f8fb' },
+  { id: 'midnight', name: 'Midnight', mode: 'dark', accent: '#6d8dff', background: '#0d111a' },
+  { id: 'dracula', name: 'Dracula', mode: 'dark', accent: '#bd93f9', background: '#282a36' },
+  { id: 'nord', name: 'Nord', mode: 'dark', accent: '#88c0d0', background: '#2e3440' },
+]
+
+export function getThemePreset(id: string): ThemePreset | undefined {
+  return THEME_PRESETS.find((theme) => theme.id === id)
+}
+
 const DARK_NEUTRALS = {
   overlay: '#3a3c43',
   ink: '#f2f3f5',
@@ -69,4 +89,15 @@ export function applyTheme(
     style.setProperty('--color-ink', DARK_NEUTRALS.ink)
     style.setProperty('--color-muted', DARK_NEUTRALS.muted)
   }
+}
+
+export function applyThemePreset(themeId: string, fallback: {
+  accent: string
+  background: string
+  mode: ThemeMode
+}) {
+  const preset = getThemePreset(themeId)
+  const theme = preset ?? { id: 'custom', ...fallback }
+  document.documentElement.dataset.theme = theme.id
+  applyTheme(theme.accent, theme.background, theme.mode)
 }

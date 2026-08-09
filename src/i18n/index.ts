@@ -16,6 +16,13 @@ import zhCNGit from './locales/zh-CN/git.json'
 import zhCNChangelog from './locales/zh-CN/changelog.json'
 import zhCNOnboarding from './locales/zh-CN/onboarding.json'
 import zhCNVersions from './locales/zh-CN/versions.json'
+import ptBRNav from './locales/pt-BR/nav.json'
+import ptBRCommon from './locales/pt-BR/common.json'
+import ptBRSettings from './locales/pt-BR/settings.json'
+import ptBRGit from './locales/pt-BR/git.json'
+import ptBRChangelog from './locales/pt-BR/changelog.json'
+import ptBROnboarding from './locales/pt-BR/onboarding.json'
+import ptBRVersions from './locales/pt-BR/versions.json'
 
 const zhCNResources = {
   nav: zhCNNav,
@@ -39,6 +46,24 @@ const resources = {
   },
   'zh-CN': zhCNResources,
   zh: zhCNResources,
+  'pt-BR': {
+    nav: ptBRNav,
+    common: ptBRCommon,
+    settings: ptBRSettings,
+    git: ptBRGit,
+    changelog: ptBRChangelog,
+    onboarding: ptBROnboarding,
+    versions: ptBRVersions,
+  },
+  pt: {
+    nav: ptBRNav,
+    common: ptBRCommon,
+    settings: ptBRSettings,
+    git: ptBRGit,
+    changelog: ptBRChangelog,
+    onboarding: ptBROnboarding,
+    versions: ptBRVersions,
+  },
 }
 
 i18n

@@ -169,6 +169,40 @@ textarea::placeholder {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 45%, transparent);
 }
 
+/* Native-like Windows 11 window controls for the custom Tauri title bar. */
+.window-control {
+  width: 46px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-muted);
+  cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+.window-control:hover {
+  color: var(--color-ink);
+  background: color-mix(in srgb, var(--color-ink) 9%, transparent);
+}
+.window-control:active {
+  background: color-mix(in srgb, var(--color-ink) 15%, transparent);
+}
+.window-control-close:hover {
+  color: #fff;
+  background: #c42b1c;
+}
+.window-control-close:active {
+  background: #a52619;
+}
+.window-control-icon {
+  width: 10px;
+  height: 10px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
 .setting-highlight {
   animation: setting-pulse 1.5s ease-out;
   border-radius: inherit;

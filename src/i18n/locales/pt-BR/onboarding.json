@@ -1,0 +1,8 @@
+{
+  "welcome": "Boas-vindas", "godot_versions": "Versões do Godot", "categories": "Categorias",
+  "customize": "Personalizar", "finish": "Concluir", "in_progress": "Em andamento",
+  "prototypes": "Protótipos", "finished": "Concluídos", "game_jams": "Game jams",
+  "project_folders": "Pastas de projetos", "version_folders": "Pastas de versões",
+  "welcome_title": "Boas-vindas ao GodotHub", "welcome_desc": "Um lugar para todos os seus projetos e versões do Godot. Vamos configurar algumas coisas; você poderá alterá-las depois.",
+  "language_title": "Escolha seu idioma", "language_desc": "Selecione o idioma do GodotHub. Você poderá alterá-lo mais tarde nas Configurações.", "language_heading": "Idioma"
+}

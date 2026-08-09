@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from 'react'
 import { api } from '../lib/api'
-import { applyTheme } from '../lib/colors'
+import { applyThemePreset } from '../lib/colors'
 import { applyAppearance } from '../lib/appearance'
 import { useWorkspaces } from './useWorkspaces'
 import { defaultCornerRadius } from '../lib/platform'
@@ -28,6 +28,7 @@ const DEFAULTS: AppSettings = {
   font_scale: 1.0,
   reduce_motion: false,
   theme_mode: 'dark',
+  theme_id: 'godot-dark',
   launch_with_console: false,
   close_on_project_open: false,
   minimize_to_tray: false,
@@ -81,9 +82,13 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
       if (cancelled) return
       setSettings(s)
       setSettingsWorkspaceId(activeId)
-      applyTheme(s.accent_color, s.background_color, s.theme_mode)
+      applyThemePreset(s.theme_id, {
+        accent: s.accent_color,
+        background: s.background_color,
+        mode: s.theme_mode,
+      })
       applyAppearance(s)
-      if (s.language && s.language !== i18n.language) {
+      if (s.setup_complete && s.language && s.language !== i18n.language) {
         i18n.changeLanguage(s.language)
       }
       setLoaded(true)
@@ -96,7 +101,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const update = async (next: AppSettings) => {
     const saved = await api.updateSettings(next)
     setSettings(saved)
-    applyTheme(saved.accent_color, saved.background_color, saved.theme_mode)
+    applyThemePreset(saved.theme_id, {
+      accent: saved.accent_color,
+      background: saved.background_color,
+      mode: saved.theme_mode,
+    })
     if (saved.language) {
       localStorage.setItem('i18nextLng', saved.language)
     }
@@ -107,11 +116,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const resetToDefaults = async () => {
     const defaults = await api.resetSettings()
     setSettings(defaults)
-    applyTheme(
-      defaults.accent_color,
-      defaults.background_color,
-      defaults.theme_mode,
-    )
+    applyThemePreset(defaults.theme_id, {
+      accent: defaults.accent_color,
+      background: defaults.background_color,
+      mode: defaults.theme_mode,
+    })
     applyAppearance(defaults)
     return defaults
   }

@@ -1,0 +1,9 @@
+{
+  "standard": "Padrão", "both": "Ambos", "stable": "Estável", "unstable": "Instável",
+  "rename": "Renomear", "open_editor": "Abrir editor", "open_editor_with_console": "Abrir editor com console",
+  "open_install_folder": "Abrir pasta de instalação", "uninstall": "Desinstalar", "type": "Tipo",
+  "channel": "Canal", "fetching": "Buscando versões…", "fetch_error": "Não foi possível buscar as versões disponíveis.",
+  "importing_version": "Importando versão…", "scanning_versions": "Procurando versões…", "import": "Importar",
+  "scanning": "Procurando…", "scan_now": "Procurar agora", "installed_title": "VERSÕES INSTALADAS",
+  "available_title": "VERSÕES DISPONÍVEIS", "open": "Abrir", "install": "Instalar", "retry": "Tentar novamente"
+}

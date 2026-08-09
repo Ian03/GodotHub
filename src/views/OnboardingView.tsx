@@ -26,6 +26,7 @@ import {
   IconRefresh,
 } from '../components/Icons'
 import type { AppSettings } from '../types'
+import { SUPPORTED_LANGUAGES, isSupportedLanguage } from '../i18n/languages'
 
 const ACCENT_PRESETS_DARK = [
   '#457ff2',
@@ -238,7 +239,12 @@ export function OnboardingView({ settings, onComplete }: Props) {
   )
   const { activeId } = useWorkspaces()
   const [stepIndex, setStepIndex] = useState(0)
-  const [draft, setDraft] = useState<AppSettings>(settings)
+  const [draft, setDraft] = useState<AppSettings>(() => ({
+    ...settings,
+    language: !settings.setup_complete && isSupportedLanguage(i18n.resolvedLanguage ?? i18n.language)
+      ? (i18n.resolvedLanguage ?? i18n.language)
+      : settings.language,
+  }))
   const [finishing, setFinishing] = useState(false)
   const [workspaceSuggestions, setWorkspaceSuggestions] = useState<
     WorkspaceScanDirs[]
@@ -416,10 +422,7 @@ export function OnboardingView({ settings, onComplete }: Props) {
                       {t('language_heading')}
                     </span>
                     <div className="inline-flex self-start rounded-lg border border-line bg-raised p-1 gap-1">
-                      {[
-                        { value: 'en-US', label: 'English' },
-                        { value: 'zh-CN', label: '简体中文' },
-                      ].map(({ value, label }) => {
+                      {SUPPORTED_LANGUAGES.map(({ value, label }) => {
                         const active = i18n.language === value || i18n.language.startsWith(value.split('-')[0])
                         return (
                           <motion.button

@@ -13,7 +13,7 @@ import { ColorSwatchPicker } from '../components/ui/ColorSwatchPicker'
 import { ConfirmDialog } from '../components/modals/ConfirmDialog'
 import { IconSun, IconMoon, IconHeart, IconRocket, IconBug } from '../components/Icons'
 import { api } from '../lib/api'
-import { applyTheme } from '../lib/colors'
+import { applyTheme, THEME_PRESETS, type ThemePreset } from '../lib/colors'
 import { isReducedMotion } from '../lib/appearance'
 import { isMac, isWindows, defaultCornerRadius } from '../lib/platform'
 import {
@@ -28,6 +28,7 @@ import { SETTINGS_SEARCH_ITEMS } from '../components/modals/CommandPalette'
 import { IconSearch, IconX, IconRefresh } from '../components/Icons'
 import { relaunch } from '@tauri-apps/plugin-process'
 import type { AppSettings } from '../types'
+import { SUPPORTED_LANGUAGES } from '../i18n/languages'
 
 const DEFAULT_ACCENT = '#457ff2'
 const DEFAULT_BG = '#15171c'
@@ -579,7 +580,21 @@ export function SettingsView({
     accent: string,
     background: string,
     mode = current.theme_mode,
-  ) => applyTheme(accent, background, mode)
+  ) => {
+    document.documentElement.dataset.theme = 'custom'
+    applyTheme(accent, background, mode)
+  }
+
+  const selectThemePreset = (theme: ThemePreset) => {
+    setFields({
+      theme_id: theme.id,
+      theme_mode: theme.mode,
+      accent_color: theme.accent,
+      background_color: theme.background,
+    })
+    document.documentElement.dataset.theme = theme.id
+    applyTheme(theme.accent, theme.background, theme.mode)
+  }
 
   const feelingLucky = () => {
     const resolvedMode = current.theme_mode
@@ -588,7 +603,7 @@ export function SettingsView({
         ? randomConstrainedHex(576, 735)
         : randomConstrainedHex(48, 384)
     const accent = randomHex()
-    setFields({ accent_color: accent, background_color: bg })
+    setFields({ theme_id: 'custom', accent_color: accent, background_color: bg })
     previewTheme(accent, bg)
   }
 
@@ -596,13 +611,13 @@ export function SettingsView({
     const resolvedMode = current.theme_mode
     const accent = DEFAULT_ACCENT
     const bg = resolvedMode === 'light' ? DEFAULT_BG_LIGHT : DEFAULT_BG_DARK
-    setFields({ accent_color: accent, background_color: bg })
+    setFields({ theme_id: 'custom', accent_color: accent, background_color: bg })
     previewTheme(accent, bg)
   }
 
   const setThemeMode = (mode: 'dark' | 'light') => {
     const bg = mode === 'light' ? DEFAULT_BG_LIGHT : DEFAULT_BG_DARK
-    setFields({ theme_mode: mode, background_color: bg })
+    setFields({ theme_id: 'custom', theme_mode: mode, background_color: bg })
     previewTheme(current.accent_color, bg, mode)
   }
   const resetAppearance = () => {
@@ -614,6 +629,7 @@ export function SettingsView({
       font_scale: DEFAULT_FONT_SCALE,
       reduce_motion: false,
       theme_mode: 'dark',
+      theme_id: 'godot-dark',
       project_icon_opacity: DEFAULT_PROJECT_ICON_OPACITY,
       new_ui: false,
     })
@@ -1342,10 +1358,7 @@ export function SettingsView({
                   </span>
                 </span>
                 <div className="inline-flex self-start rounded-lg border border-line bg-raised p-1 gap-1">
-                  {[
-                    { value: 'en-US', label: 'English' },
-                    { value: 'zh-CN', label: '简体中文' },
-                  ].map(({ value, label }) => {
+                  {SUPPORTED_LANGUAGES.map(({ value, label }) => {
                     const active = i18n.language === value || i18n.language.startsWith(value.split('-')[0])
                     return (
                       <motion.button
@@ -1432,6 +1445,27 @@ export function SettingsView({
 
                 <div className="flex flex-col gap-2.5">
                   <span className="text-xs font-medium text-muted">{t('theme')}</span>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {THEME_PRESETS.map((theme) => (
+                      <button
+                        key={theme.id}
+                        type="button"
+                        onClick={() => selectThemePreset(theme)}
+                        className={
+                          'focus-ring flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs transition-colors ' +
+                          (current.theme_id === theme.id
+                            ? 'border-accent bg-accent/10 text-ink'
+                            : 'border-line bg-raised text-muted hover:bg-overlay/60 hover:text-ink')
+                        }
+                      >
+                        <span
+                          className="h-4 w-4 rounded-full border border-white/15 shrink-0"
+                          style={{ backgroundColor: theme.accent }}
+                        />
+                        {theme.name}
+                      </button>
+                    ))}
+                  </div>
                   <div className="flex items-center gap-3 flex-wrap">
                     
                     <div className="inline-flex self-start rounded-lg border border-line bg-raised p-1 gap-1">
@@ -1495,7 +1529,7 @@ export function SettingsView({
                         : ACCENT_PRESETS_DARK
                     }
                     onChange={(hex) => {
-                      setField('accent_color', hex)
+                      setFields({ theme_id: 'custom', accent_color: hex })
                       previewTheme(hex, current.background_color)
                     }}
                   />
@@ -1508,7 +1542,7 @@ export function SettingsView({
                         : BG_PRESETS_DARK
                     }
                     onChange={(hex) => {
-                      setField('background_color', hex)
+                      setFields({ theme_id: 'custom', background_color: hex })
                       previewTheme(current.accent_color, hex)
                     }}
                   />

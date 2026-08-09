@@ -1,0 +1,11 @@
+{
+  "new_project": "Novo projeto", "import_project": "Importar projeto", "search": "Buscar", "cancel": "Cancelar",
+  "confirm": "Confirmar", "save": "Salvar", "delete": "Excluir", "close": "Fechar", "loading": "Carregando…",
+  "no_results": "Nenhum resultado encontrado", "error_occurred": "Ocorreu um erro", "retry": "Tentar novamente",
+  "launch": "Iniciar", "stop": "Parar", "refresh": "Atualizar", "dismiss": "Dispensar",
+  "add_workspace": "Adicionar workspace", "minimize": "Minimizar", "restore": "Restaurar", "maximize": "Maximizar",
+  "star_on_github": "Dar estrela no GitHub", "support": "Apoiar", "support_dev": "Apoie o desenvolvimento no Patreon. Você pode ocultar isto nas Configurações.",
+  "app_loading": "Carregando…", "scanning_projects": "Procurando projetos…", "scanning_versions": "Procurando versões…",
+  "importing": "Importando…", "import": "Importar", "syncing": "Sincronizando…", "sync_now": "Sincronizar agora",
+  "git_beta_badge": "Beta", "soon_badge": "Em breve", "command_palette_placeholder": "Buscar comandos, projetos, engines e configurações…"
+}

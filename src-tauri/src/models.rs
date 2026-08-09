@@ -144,6 +144,10 @@ pub struct AppSettings {
     pub reduce_motion: bool,
     #[serde(default = "default_theme_mode")]
     pub theme_mode: String,
+    // Existing settings only have colors, so treat a missing field as a custom
+    // theme and preserve the user's established appearance on upgrade.
+    #[serde(default = "default_legacy_theme_id")]
+    pub theme_id: String,
     #[serde(default)]
     pub launch_with_console: bool,
     #[serde(default)]
@@ -251,6 +255,12 @@ fn default_font_scale() -> f64 {
 }
 fn default_theme_mode() -> String {
     "dark".to_string()
+}
+fn default_theme_id() -> String {
+    "godot-dark".to_string()
+}
+fn default_legacy_theme_id() -> String {
+    "custom".to_string()
 }
 fn default_last_opened_time_format() -> String {
     "12h".to_string()
@@ -379,6 +389,7 @@ impl Default for AppSettings {
             launch_with_console: false,
             reduce_motion: false,
             theme_mode: default_theme_mode(),
+            theme_id: default_theme_id(),
             close_on_project_open: false,
             minimize_to_tray: false,
             reopen_after_godot_closes: false,
