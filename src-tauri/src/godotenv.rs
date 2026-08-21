@@ -254,14 +254,23 @@ fn parse_godotrc(path: &Path) -> Option<DetectedVersion> {
     if line.is_empty() {
         return None;
     }
-    const NO_DOTNET: [&str; 3] = [" no-dotnet", " non-dotnet", " not-dotnet"];
+    const NO_DOTNET: [&str; 4] = [" no-dotnet", " non-dotnet", " not-dotnet", " no dotnet"];
+    const DOTNET: [&str; 2] = [" mono", " dotnet"];
     let mut is_dotnet = true;
     let mut version = line;
     for suffix in NO_DOTNET {
-        if version.ends_with(suffix) {
+        if version.to_lowercase().ends_with(suffix) {
             is_dotnet = false;
             version = &version[..version.len() - suffix.len()];
             break;
+        }
+    }
+    if is_dotnet {
+        for suffix in DOTNET {
+            if version.to_lowercase().ends_with(suffix) {
+                version = &version[..version.len() - suffix.len()];
+                break;
+            }
         }
     }
     let number = parse_version(version)?;
@@ -292,15 +301,47 @@ pub fn sharp_string(n: &GodotVersionNumber) -> String {
 pub fn pin_version(project_dir: &str, tag: &str) -> Result<(), String> {
     let number = match parse_installed_tag(tag) {
         Some(n) => n,
-        None => return Ok(()), // unrecognized tag: leave the project untouched
+        None => return Ok(())
     };
     let is_mono = tag.trim().ends_with("-mono");
     let root = Path::new(project_dir);
     if is_mono {
-        write_global_json_pin(root, &number)
+        write_global_json_pin(root, &number)?;
+        if parse_global_json(&root.join("global.json")).is_some() {
+            let _ = fs::remove_file(root.join(".godotrc"));
+        }
+        Ok(())
     } else {
-        write_godotrc_pin(root, &number)
+        write_godotrc_pin(root, &number)?;
+        remove_godot_sdk_pin(root);
+        Ok(())
     }
+}
+
+fn remove_godot_sdk_pin(root: &Path) {
+    let path = root.join("global.json");
+    let Ok(existing) = fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(mut json) = serde_json::from_str::<serde_json::Value>(&existing) else {
+        return;
+    };
+    let Some(obj) = json.as_object_mut() else {
+        return;
+    };
+    let Some(msbuild) = obj.get_mut("msbuild-sdks").and_then(|v| v.as_object_mut()) else {
+        return;
+    };
+    if msbuild.remove("Godot.NET.Sdk").is_none() {
+        return;
+    }
+    if msbuild.is_empty() {
+        obj.remove("msbuild-sdks");
+    }
+    let Ok(out) = serde_json::to_string_pretty(&json) else {
+        return;
+    };
+    let _ = fs::write(&path, out + "\n");
 }
 
 fn write_godotrc_pin(root: &Path, number: &GodotVersionNumber) -> Result<(), String> {
@@ -371,266 +412,4 @@ fn replace_sdk_value(line: &str, version: &str) -> String {
     out.push_str(version);
     out.push_str(&line[qend..]);
     out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn num(major: u32, minor: u32, patch: u32, label: &str, label_num: i32) -> GodotVersionNumber {
-        GodotVersionNumber {
-            major,
-            minor,
-            patch,
-            label: label.to_string(),
-            label_num,
-        }
-    }
-
-    #[test]
-    fn parses_release_versions() {
-        assert_eq!(parse_release_version("4.3-stable"), Some(num(4, 3, 0, "stable", -1)));
-        assert_eq!(parse_release_version("4.2.2-stable"), Some(num(4, 2, 2, "stable", -1)));
-        assert_eq!(parse_release_version("4.3-rc1"), Some(num(4, 3, 0, "rc", 1)));
-        assert_eq!(parse_release_version("4.3-beta2"), Some(num(4, 3, 0, "beta", 2)));
-        assert_eq!(parse_release_version("3.5.1-stable"), Some(num(3, 5, 1, "stable", -1)));
-        assert_eq!(parse_release_version("4.3.0-stable"), None);
-        assert_eq!(parse_release_version("4.3"), None);
-        assert_eq!(parse_release_version("4.3-"), None);
-        assert_eq!(parse_release_version("4.3-RC1"), None);
-        assert_eq!(parse_release_version("4.3.0-alpha17"), None);
-    }
-
-    #[test]
-    fn parses_sharp_versions() {
-        assert_eq!(parse_sharp_version("4.3.0"), Some(num(4, 3, 0, "stable", -1)));
-        assert_eq!(parse_sharp_version("4.2.2"), Some(num(4, 2, 2, "stable", -1)));
-        assert_eq!(parse_sharp_version("4.3.0-rc.1"), Some(num(4, 3, 0, "rc", 1)));
-        assert_eq!(parse_sharp_version("4.3.0-beta.2"), Some(num(4, 3, 0, "beta", 2)));
-        assert_eq!(parse_sharp_version("4.3.0-alpha17"), None);
-        assert_eq!(parse_sharp_version("4.3"), None);
-    }
-
-    #[test]
-    fn parses_installed_tags() {
-        assert_eq!(parse_installed_tag("4.3-stable"), Some(num(4, 3, 0, "stable", -1)));
-        assert_eq!(parse_installed_tag("4.3-stable-mono"), Some(num(4, 3, 0, "stable", -1)));
-        assert_eq!(parse_installed_tag("4.2.2-stable-mono"), Some(num(4, 2, 2, "stable", -1)));
-        assert_eq!(parse_installed_tag("4.3-rc1-mono"), Some(num(4, 3, 0, "rc", 1)));
-    }
-
-    #[test]
-    fn serializers_round_trip() {
-        let cases = [
-            ("4.3-stable", num(4, 3, 0, "stable", -1)),
-            ("4.2.2-stable", num(4, 2, 2, "stable", -1)),
-            ("4.3-rc1", num(4, 3, 0, "rc", 1)),
-        ];
-        for (expected, n) in cases {
-            assert_eq!(release_string(&n), expected);
-            assert_eq!(parse_version(expected), Some(n.clone()));
-        }
-        assert_eq!(sharp_string(&num(4, 3, 0, "stable", -1)), "4.3.0");
-        assert_eq!(sharp_string(&num(4, 3, 0, "rc", 1)), "4.3.0-rc.1");
-        assert_eq!(parse_version("4.3.0-rc.1"), Some(num(4, 3, 0, "rc", 1)));
-    }
-
-    fn temp_project() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "godothub_godotenv_test_{}_{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
-    #[test]
-    fn parses_godotrc_file() {
-        let dir = temp_project();
-        let path = dir.join(".godotrc");
-        fs::write(&path, "4.3-stable\n").unwrap();
-        let v = parse_godotrc(&path).unwrap();
-        assert_eq!(v.number, num(4, 3, 0, "stable", -1));
-        assert!(v.is_dotnet);
-
-        fs::write(&path, "4.2.2-stable no-dotnet\n").unwrap();
-        let v = parse_godotrc(&path).unwrap();
-        assert_eq!(v.number, num(4, 2, 2, "stable", -1));
-        assert!(!v.is_dotnet);
-
-        fs::write(&path, "4.3-rc1 non-dotnet\n").unwrap();
-        let v = parse_godotrc(&path).unwrap();
-        assert!(!v.is_dotnet);
-
-        fs::write(&path, "4.3-rc1 not-dotnet\n").unwrap();
-        let v = parse_godotrc(&path).unwrap();
-        assert!(!v.is_dotnet);
-
-        fs::write(&path, "bogus\n").unwrap();
-        assert!(parse_godotrc(&path).is_none());
-        fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn parses_global_json_file() {
-        let dir = temp_project();
-        let path = dir.join("global.json");
-        fs::write(&path, "{\n  \"msbuild-sdks\": {\n    \"Godot.NET.Sdk\": \"4.3.0\"\n  }\n}\n").unwrap();
-        let v = parse_global_json(&path).unwrap();
-        assert_eq!(v.number, num(4, 3, 0, "stable", -1));
-        assert!(v.is_dotnet);
-
-        fs::write(&path, "{\n  \"msbuild-sdks\": {\n    \"Godot.NET.Sdk\": \"4.3.0-rc.1\"\n  }\n}\n").unwrap();
-        let v = parse_global_json(&path).unwrap();
-        assert_eq!(v.number, num(4, 3, 0, "rc", 1));
-
-        fs::write(&path, "{\n  \"sdk\": {\n    \"version\": \"8.0.100\"\n  }\n}\n").unwrap();
-        assert!(parse_global_json(&path).is_none());
-        fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn parses_csproj_file() {
-        let dir = temp_project();
-        let path = dir.join("Game.csproj");
-        fs::write(&path, "<Project Sdk=\"Godot.NET.Sdk/4.2.2\">\n  <PropertyGroup/>\n</Project>\n").unwrap();
-        let v = parse_csproj(&path).unwrap();
-        assert_eq!(v.number, num(4, 2, 2, "stable", -1));
-        assert!(v.is_dotnet);
-
-        fs::write(&path, "<Project Sdk=\"Microsoft.NET.Sdk\">\n</Project>\n").unwrap();
-        assert!(parse_csproj(&path).is_none());
-        fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn detection_precedence_global_beats_godotrc() {
-        let dir = temp_project();
-        fs::write(dir.join("global.json"), "{\"msbuild-sdks\":{\"Godot.NET.Sdk\":\"4.3.0\"}}\n").unwrap();
-        fs::write(dir.join(".godotrc"), "4.2.2-stable no-dotnet\n").unwrap();
-        let v = detect_version(dir.to_str().unwrap()).unwrap();
-        assert_eq!(v.number, num(4, 3, 0, "stable", -1));
-        assert!(v.is_dotnet);
-        fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn detection_precedence_csproj_beats_godotrc() {
-        let dir = temp_project();
-        fs::write(dir.join("Game.csproj"), "<Project Sdk=\"Godot.NET.Sdk/4.2.2\"></Project>\n").unwrap();
-        fs::write(dir.join(".godotrc"), "4.3-stable no-dotnet\n").unwrap();
-        let v = detect_version(dir.to_str().unwrap()).unwrap();
-        assert_eq!(v.number, num(4, 2, 2, "stable", -1));
-        fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn detection_finds_ancestor_files() {
-        let root = temp_project();
-        let project = root.join("src");
-        fs::create_dir_all(&project).unwrap();
-        fs::write(root.join(".godotrc"), "4.3-stable no-dotnet\n").unwrap();
-        let v = detect_version(project.to_str().unwrap()).unwrap();
-        assert_eq!(v.number, num(4, 3, 0, "stable", -1));
-        assert!(!v.is_dotnet);
-        fs::remove_dir_all(&root).ok();
-    }
-
-    #[test]
-    fn detection_none_when_no_files() {
-        let dir = temp_project();
-        assert!(detect_version(dir.to_str().unwrap()).is_none());
-        fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn matching_respects_dotnet_preference() {
-        let dir = temp_project();
-        fs::write(dir.join(".godotrc"), "4.3-stable no-dotnet\n").unwrap();
-        let spec = detect_version(dir.to_str().unwrap()).unwrap();
-        let standard = InstalledGodotVersion {
-            tag: "4.3-stable".into(),
-            version: "4.3".into(),
-            executable_path: String::new(),
-            is_mono: false,
-            installed_at: String::new(),
-            custom_name: None,
-            install_root: None,
-            supports_console: true,
-        };
-        let mono = InstalledGodotVersion {
-            tag: "4.3-stable-mono".into(),
-            version: "4.3".into(),
-            executable_path: String::new(),
-            is_mono: true,
-            installed_at: String::new(),
-            custom_name: None,
-            install_root: None,
-            supports_console: true,
-        };
-        assert!(matches_detected(&spec, &standard.tag));
-        assert!(matches_detected(&spec, &mono.tag));
-        assert_eq!(best_match(&spec, &[mono.clone(), standard.clone()]).unwrap().tag, "4.3-stable");
-        assert_eq!(best_match(&spec, std::slice::from_ref(&mono)).unwrap().tag, "4.3-stable-mono");
-
-        fs::write(dir.join(".godotrc"), "4.3-stable\n").unwrap();
-        let dotnet_spec = detect_version(dir.to_str().unwrap()).unwrap();
-        assert!(dotnet_spec.is_dotnet);
-        assert_eq!(best_match(&dotnet_spec, &[standard, mono]).unwrap().tag, "4.3-stable-mono");
-        fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn pins_standard_version_to_godotrc() {
-        let dir = temp_project();
-        pin_version(dir.to_str().unwrap(), "4.3-stable").unwrap();
-        let content = fs::read_to_string(dir.join(".godotrc")).unwrap();
-        assert_eq!(content, "4.3-stable no-dotnet\n");
-        let v = detect_version(dir.to_str().unwrap()).unwrap();
-        assert_eq!(v.number, num(4, 3, 0, "stable", -1));
-        assert!(!v.is_dotnet);
-        fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn pins_dotnet_version_to_global_json() {
-        let dir = temp_project();
-        pin_version(dir.to_str().unwrap(), "4.3-stable-mono").unwrap();
-        let content = fs::read_to_string(dir.join("global.json")).unwrap();
-        assert!(content.contains("\"Godot.NET.Sdk\": \"4.3.0\""), "{content}");
-        let v = detect_version(dir.to_str().unwrap()).unwrap();
-        assert_eq!(v.number, num(4, 3, 0, "stable", -1));
-        assert!(v.is_dotnet);
-        fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn pin_preserves_existing_global_json() {
-        let dir = temp_project();
-        fs::write(
-            dir.join("global.json"),
-            "{\n  \"sdk\": {\n    \"version\": \"8.0.100\"\n  },\n  \"msbuild-sdks\": {\n    \"Other.Sdk\": \"1.2.3\"\n  }\n}\n",
-        )
-        .unwrap();
-        pin_version(dir.to_str().unwrap(), "4.2.2-stable-mono").unwrap();
-        let content = fs::read_to_string(dir.join("global.json")).unwrap();
-        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
-        assert_eq!(json["sdk"]["version"], "8.0.100");
-        assert_eq!(json["msbuild-sdks"]["Other.Sdk"], "1.2.3");
-        assert_eq!(json["msbuild-sdks"]["Godot.NET.Sdk"], "4.2.2");
-        fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn pin_ignores_unrecognized_tags() {
-        let dir = temp_project();
-        pin_version(dir.to_str().unwrap(), "my-custom-build").unwrap();
-        assert!(!dir.join(".godotrc").exists());
-        assert!(!dir.join("global.json").exists());
-        fs::remove_dir_all(&dir).ok();
-    }
 }

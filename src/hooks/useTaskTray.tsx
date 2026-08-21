@@ -25,6 +25,7 @@ export interface Task {
     | 'sync-templates'
     | 'clone-repo'
     | 'import-projects'
+    | 'import-versions'
   label: string
   description?: string
   progress: { current: number; total: number } | null
@@ -96,7 +97,6 @@ export function TaskTrayProvider({ children }: { children: ReactNode }) {
     [clearTimer],
   )
 
-
   useTauriEvent<[number, number]>('project-scan-progress', ([current, total]) => {
     if (current < total) {
       registerTask({
@@ -129,11 +129,14 @@ export function TaskTrayProvider({ children }: { children: ReactNode }) {
     }
   })
 
+  const godotDownloadLabel = (key: string) =>
+    i18n.t('common:downloading_version', { version: key })
+
   useTauriEvent<string>('godot-download-queued', (key) => {
     registerTask({
       id: `download-${key}`,
       type: 'download-godot',
-      label: i18n.t('common:downloading_version', { version: key }),
+      label: godotDownloadLabel(key),
       description: i18n.t('common:queued'),
       progress: null,
       status: 'queued',
@@ -148,7 +151,7 @@ export function TaskTrayProvider({ children }: { children: ReactNode }) {
     registerTask({
       id,
       type: 'download-godot',
-      label: i18n.t('common:downloading_version', { version: tag }),
+      label: godotDownloadLabel(tag),
       description:
         total > 0
           ? `${(downloaded / 1024 / 1024).toFixed(1)} / ${(total / 1024 / 1024).toFixed(1)} MB (${pct}%)`
@@ -166,6 +169,18 @@ export function TaskTrayProvider({ children }: { children: ReactNode }) {
     unregisterTask(`download-${key}`)
   })
 
+  useTauriEvent<string[]>('godot-download-queue', (keys) => {
+    setTasks((prev) => {
+      const ordered = keys.map((k) => `download-${k}`)
+      const ids = new Set(ordered)
+      const byId = new Map(prev.map((t) => [t.id, t]))
+      const rest = prev.filter((t) => !ids.has(t.id)).map((t) => t.id)
+      return [...ordered, ...rest]
+        .filter((id) => byId.has(id))
+        .map((id) => byId.get(id)!)
+    })
+  })
+
   useTauriEvent<{ tag: string; message: string }>('godot-download-error', (payload) => {
     updateTask(`download-${payload.tag}`, {
       status: 'error',
@@ -178,7 +193,6 @@ export function TaskTrayProvider({ children }: { children: ReactNode }) {
     updateTask(`download-${key}`, { status: 'completed' })
     scheduleRemoval(`download-${key}`, 3000)
   })
-
 
   useTauriEvent<AssetDownloadProgress>('asset-download-queued', (payload) => {
     registerTask({

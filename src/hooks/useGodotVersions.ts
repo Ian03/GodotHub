@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { useTauriEvent } from '../lib/useTauriEvent'
 import { useWorkspaces } from './useWorkspaces'
@@ -15,28 +15,53 @@ export interface DownloadState extends DownloadProgress {
 const keyOf = (tag: string, assetName: string) =>
   assetName.toLowerCase().includes('mono') ? `${tag}-mono` : tag
 
+const sameInstalled = (
+  a: InstalledGodotVersion[],
+  b: InstalledGodotVersion[],
+) => JSON.stringify(a) === JSON.stringify(b)
+
 export function useGodotVersions() {
   const { activeId } = useWorkspaces()
   const [installed, setInstalled] = useState<InstalledGodotVersion[]>([])
   const [available, setAvailable] = useState<GodotRelease[]>([])
   const [loadingAvailable, setLoadingAvailable] = useState(false)
   const [availableError, setAvailableError] = useState<string | null>(null)
+  const [source, setSource] = useState<'github' | 'archive'>(() => {
+    try {
+      return localStorage.getItem('godothub_version_source') === 'archive'
+        ? 'archive'
+        : 'github'
+    } catch {
+      return 'github'
+    }
+  })
+  const sourceRef = useRef(source)
+  sourceRef.current = source
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('godothub_version_source', source)
+    } catch {}
+  }, [source])
   const [downloads, setDownloads] = useState<Record<string, DownloadState>>({})
   const [scanProgress, setScanProgress] = useState<{
     current: number
     total: number
   } | null>(null)
 
-  const refreshInstalled = useCallback(
-    async () => setInstalled(await api.listInstalledGodotVersions()),
-    [],
-  )
+  const refreshInstalled = useCallback(async () => {
+    const next = await api.listInstalledGodotVersions()
+    setInstalled((prev) => (sameInstalled(prev, next) ? prev : next))
+  }, [])
 
-  const refreshAvailable = useCallback(async () => {
+  const refreshAvailable = useCallback(async (src?: string) => {
+    const next = src === 'archive' || src === 'github' ? src : sourceRef.current
+    setSource(next)
+    sourceRef.current = next
     setLoadingAvailable(true)
     setAvailableError(null)
     try {
-      setAvailable(await api.fetchAvailableGodotVersions())
+      setAvailable(await api.fetchAvailableGodotVersions(next))
     } catch (e) {
       setAvailableError(String(e))
     } finally {
@@ -160,6 +185,7 @@ export function useGodotVersions() {
     available,
     loadingAvailable,
     availableError,
+    source,
     downloads,
     download,
     pause,

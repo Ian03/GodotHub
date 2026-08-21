@@ -2,13 +2,17 @@ import { invoke } from '@tauri-apps/api/core'
 import type { GodotRelease, InstalledGodotVersion } from '../types'
 
 export const versionsApi = {
-  fetchAvailable: () =>
-    invoke<GodotRelease[]>('fetch_available_godot_versions'),
+  fetchAvailable: (source?: string) =>
+    invoke<GodotRelease[]>('fetch_available_godot_versions', {
+      source: source ?? 'github',
+    }),
   download: (tag: string, assetName: string, downloadUrl: string) =>
     invoke<void>('download_godot_version', { tag, assetName, downloadUrl }),
   pauseDownload: (key: string) => invoke<void>('pause_download', { key }),
   resumeDownload: (key: string) => invoke<void>('resume_download', { key }),
   cancelDownload: (key: string) => invoke<void>('cancel_download', { key }),
+  reorderDownloadQueue: (key: string, direction: number) =>
+    invoke<void>('reorder_download_queue', { key, direction }),
   listInstalled: () =>
     invoke<InstalledGodotVersion[]>('list_installed_godot_versions'),
   rename: (tag: string, customName: string | null) =>

@@ -1,24 +1,48 @@
 mod asset_library;
+mod backup;
 mod categories;
 mod changelog;
 mod error;
 mod git;
+mod git_auth;
 mod git_helpers;
 mod godot_versions;
 mod godotenv;
+mod install_mode;
+mod licenses;
 mod models;
 mod news;
 mod persist;
 mod projects;
 mod scan;
 mod settings;
+mod sync;
 mod templates;
 mod terminal;
+mod time_stats;
 mod tray;
+mod updates;
 mod watcher;
 mod workspace;
 
 use tauri::{Manager, WindowEvent};
+
+#[tauri::command]
+fn get_os_username() -> Option<String> {
+    for var in ["USERNAME", "USER", "LOGNAME"] {
+        if let Ok(v) = std::env::var(var) {
+            if !v.trim().is_empty() {
+                return Some(v);
+            }
+        }
+    }
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()?;
+    std::path::Path::new(&home)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+}
 
 #[tauri::command]
 async fn pick_folder(app: tauri::AppHandle) -> Option<String> {
@@ -30,12 +54,39 @@ async fn pick_folder(app: tauri::AppHandle) -> Option<String> {
     rx.recv().ok().flatten().map(|p| p.to_string())
 }
 
+#[tauri::command]
+async fn pick_save_path(app: tauri::AppHandle, default_name: String) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog()
+        .file()
+        .set_file_name(&default_name)
+        .save_file(move |file| {
+            let _ = tx.send(file);
+        });
+    rx.recv().ok().flatten().map(|p| p.to_string())
+}
+
+#[tauri::command]
+async fn pick_data_file(app: tauri::AppHandle) -> Option<String> {
+    use tauri_plugin_dialog::DialogExt;
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog()
+        .file()
+        .add_filter("JSON", &["json"])
+        .pick_file(move |file| {
+            let _ = tx.send(file);
+        });
+    rx.recv().ok().flatten().map(|p| p.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             tray::show_main_window(app);
         }))
+        .plugin(tauri_plugin_discord_rpc::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
@@ -51,10 +102,15 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
+            if let Ok(dir) = app.path().app_data_dir() {
+                git_helpers::set_credential_store(dir.join("git-credentials"));
+            }
+
             app.manage(std::sync::Arc::new(
                 asset_library::AssetResponseCache::default(),
             ));
             app.manage(watcher::ActiveWatchers(std::sync::Mutex::new(Vec::new())));
+            app.manage(watcher::GitWatcher(std::sync::Mutex::new(None)));
 
             godot_versions::migrate_registry_to_global(app.handle());
 
@@ -109,6 +165,17 @@ pub fn run() {
                     return;
                 }
 
+                {
+                    use tauri_plugin_window_state::AppHandleExt as _;
+                    let _ = window
+                        .app_handle()
+                        .save_window_state(
+                            tauri_plugin_window_state::StateFlags::SIZE
+                                | tauri_plugin_window_state::StateFlags::POSITION
+                                | tauri_plugin_window_state::StateFlags::MAXIMIZED,
+                        );
+                }
+
                 #[cfg(target_os = "macos")]
                 let keep_alive = true;
                 #[cfg(not(target_os = "macos"))]
@@ -126,12 +193,21 @@ pub fn run() {
             godot_versions::pause_download,
             godot_versions::resume_download,
             godot_versions::cancel_download,
+            godot_versions::reorder_download_queue,
             godot_versions::list_installed_godot_versions,
             godot_versions::rename_godot_version,
             godot_versions::delete_godot_version,
             godot_versions::open_godot_version,
             godot_versions::test_github_token,
             godot_versions::get_github_rate_limit,
+            git_auth::start_device_flow,
+            git_auth::poll_device_flow,
+            git_auth::get_git_auth_state,
+            git_auth::disconnect_git_auth,
+            git_auth::save_git_pat,
+            git_auth::remove_git_pat,
+            git_auth::create_remote_repo,
+            git_auth::list_user_repos,
             godot_versions::import_version_zip,
             projects::list_projects,
             projects::create_project,
@@ -147,9 +223,16 @@ pub fn run() {
             projects::get_project_name,
             projects::validate_godot_folder,
             projects::stop_project,
+            projects::list_running_projects,
             projects::pick_file,
             projects::read_image_file,
             projects::write_project_tags,
+            projects::export_project_stats,
+            projects::import_project_stats,
+            time_stats::get_activity,
+            time_stats::get_project_activity,
+            time_stats::get_time_insights,
+            time_stats::clear_time_stats,
             categories::list_categories,
             categories::create_category,
             categories::update_category,
@@ -159,7 +242,16 @@ pub fn run() {
             settings::get_settings,
             settings::update_settings,
             settings::reset_settings,
+            settings::export_settings,
+            settings::import_settings,
+            backup::export_workspace_backup,
+            backup::import_workspace_backup,
+            backup::export_app_backup,
+            backup::import_app_backup,
+            sync::gist_sync_push,
+            sync::gist_sync_pull,
             settings::reset_app_data,
+            get_os_username,
             workspace::list_workspaces,
             workspace::list_workspace_scan_dirs,
             workspace::create_workspace,
@@ -189,6 +281,10 @@ pub fn run() {
             changelog::add_changelog_entry,
             changelog::update_changelog_entry,
             changelog::delete_changelog_entry,
+            changelog::list_git_tags,
+            changelog::generate_changelog_draft,
+            updates::fetch_updates,
+            install_mode::is_portable_install,
             git::clone_repo,
             git::get_git_status,
             git::batch_git_status,
@@ -198,17 +294,24 @@ pub fn run() {
             git::git_push,
             git::git_log,
             git::git_log_entries,
+            git::git_list_remotes,
+            git::git_ahead_behind,
+            git::git_show_commit,
             git::git_remote_url,
             git::git_list_branches,
+            git::git_branch_publish,
             git::git_switch_branch,
             git::git_create_branch,
             git::git_delete_branch,
             git::git_stash_push,
             git::git_stash_list,
             git::git_stash_apply,
+            git::git_stash_show,
+            git::git_stash_pop,
             git::git_stash_drop,
             git::git_changed_files,
             git::git_discard_changes,
+            git::git_discard_file,
             git::git_init,
             git::git_init_project,
             git::git_is_available,
@@ -228,7 +331,11 @@ pub fn run() {
             git::git_is_merging,
             tray::refresh_tray_menu,
             pick_folder,
+            pick_save_path,
+            pick_data_file,
             watcher::restart_watchers,
+            watcher::start_git_fs_watcher,
+            watcher::stop_git_fs_watcher,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

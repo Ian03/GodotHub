@@ -153,12 +153,17 @@ pub fn register_version(app: &AppHandle, version: InstalledGodotVersion) -> Resu
     Ok(true)
 }
 
-fn releases_cache_file(app: &AppHandle) -> PathBuf {
+fn releases_cache_file(app: &AppHandle, source: &str) -> PathBuf {
     let base = app.path().app_data_dir().expect("no app data dir");
     if !base.exists() {
         let _ = fs::create_dir_all(&base);
     }
-    base.join("godot-releases-cache.json")
+    let name = if source == "archive" {
+        "godot-archive-cache.json"
+    } else {
+        "godot-releases-cache.json"
+    };
+    base.join(name)
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -175,8 +180,8 @@ fn asset_target() -> String {
     format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
 }
 
-fn read_cache_allow_stale(app: &AppHandle) -> Option<(Vec<GodotRelease>, i64)> {
-    let file = releases_cache_file(app);
+fn read_cache_allow_stale(app: &AppHandle, source: &str) -> Option<(Vec<GodotRelease>, i64)> {
+    let file = releases_cache_file(app, source);
     let raw = fs::read_to_string(&file).ok()?;
     let cache: ReleasesCache = serde_json::from_str(&raw).ok()?;
     if cache.asset_target != asset_target() {
@@ -185,14 +190,14 @@ fn read_cache_allow_stale(app: &AppHandle) -> Option<(Vec<GodotRelease>, i64)> {
     Some((dedupe_releases(cache.releases), cache.fetched_at))
 }
 
-fn write_releases_cache(app: &AppHandle, releases: &[GodotRelease]) {
+fn write_releases_cache(app: &AppHandle, source: &str, releases: &[GodotRelease]) {
     let cache = ReleasesCache {
         fetched_at: chrono::Utc::now().timestamp(),
         asset_target: asset_target(),
         releases: releases.to_vec(),
     };
     if let Ok(json) = serde_json::to_string_pretty(&cache) {
-        let _ = fs::write(releases_cache_file(app), json);
+        let _ = fs::write(releases_cache_file(app, source), json);
     }
 }
 
@@ -240,8 +245,19 @@ fn platform_asset_matcher(name: &str) -> bool {
 }
 
 #[tauri::command]
-pub async fn fetch_available_godot_versions(app: AppHandle) -> Result<Vec<GodotRelease>, String> {
-    if let Some((cached, fetched_at)) = read_cache_allow_stale(&app) {
+pub async fn fetch_available_godot_versions(
+    app: AppHandle,
+    source: Option<String>,
+) -> Result<Vec<GodotRelease>, String> {
+    if source.as_deref() == Some("archive") {
+        fetch_archive_versions(app).await
+    } else {
+        fetch_github_versions(app).await
+    }
+}
+
+async fn fetch_github_versions(app: AppHandle) -> Result<Vec<GodotRelease>, String> {
+    if let Some((cached, fetched_at)) = read_cache_allow_stale(&app, "github") {
         let now = chrono::Utc::now().timestamp();
         if now - fetched_at >= CACHE_TTL_SECS {
             let app_clone = app.clone();
@@ -255,9 +271,25 @@ pub async fn fetch_available_godot_versions(app: AppHandle) -> Result<Vec<GodotR
     refresh_releases_cache(app).await
 }
 
+async fn fetch_archive_versions(app: AppHandle) -> Result<Vec<GodotRelease>, String> {
+    if let Some((cached, fetched_at)) = read_cache_allow_stale(&app, "archive") {
+        let now = chrono::Utc::now().timestamp();
+        if now - fetched_at >= CACHE_TTL_SECS {
+            let app_clone = app.clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = refresh_archive_releases(app_clone).await;
+            });
+        }
+        return Ok(cached);
+    }
+
+    refresh_archive_releases(app).await
+}
+
 async fn refresh_releases_cache(app: AppHandle) -> Result<Vec<GodotRelease>, String> {
     let settings = crate::settings::read_settings(&app);
-    let token = settings.github_token.filter(|t| !t.trim().is_empty());
+    let token = crate::git_auth::github_oauth_token(&app)
+        .or_else(|| settings.github_token.filter(|t| !t.trim().is_empty()));
 
     let mut client_builder = reqwest::Client::builder().user_agent("godot-hub");
     if token.is_some() {
@@ -303,7 +335,7 @@ async fn refresh_releases_cache(app: AppHandle) -> Result<Vec<GodotRelease>, Str
                 "GitHub API error: {} (rate limit remaining: {}).{} {}",
                 status, remaining, reset_msg, body
             );
-            if let Ok(raw) = fs::read_to_string(releases_cache_file(&app)) {
+            if let Ok(raw) = fs::read_to_string(releases_cache_file(&app, "github")) {
                 if let Ok(stale) = serde_json::from_str::<ReleasesCache>(&raw) {
                     if stale.asset_target == asset_target() {
                         return Ok(stale.releases);
@@ -357,8 +389,123 @@ async fn refresh_releases_cache(app: AppHandle) -> Result<Vec<GodotRelease>, Str
         page += 1;
     }
 
-    write_releases_cache(&app, &releases);
+    write_releases_cache(&app, "github", &releases);
     Ok(releases)
+}
+
+async fn refresh_archive_releases(app: AppHandle) -> Result<Vec<GodotRelease>, String> {
+    let client = reqwest::Client::builder()
+        .user_agent("godot-hub")
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let index_html = client
+        .get("https://godotengine.org/download/archive/")
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch Godot archive: {e}"))?
+        .text()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let tags = parse_archive_tags(&index_html);
+    let releases: Vec<GodotRelease> = futures_util::stream::iter(
+        tags.into_iter().filter(|t| meets_min_version(t)),
+    )
+    .map(|tag| {
+        let client = client.clone();
+        async move {
+            let assets = fetch_archive_assets(&client, &tag).await;
+            if assets.is_empty() {
+                None
+            } else {
+                Some(GodotRelease { tag, assets })
+            }
+        }
+    })
+    .buffered(8)
+    .filter_map(|r| async move { r })
+    .collect()
+    .await;
+
+    write_releases_cache(&app, "archive", &releases);
+    Ok(releases)
+}
+
+fn parse_archive_tags(html: &str) -> Vec<String> {
+    const MARKER: &str = "/download/archive/";
+    let mut tags = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut rest = html;
+    while let Some(idx) = rest.find(MARKER) {
+        let after = &rest[idx + MARKER.len()..];
+        let end = after.find('"').unwrap_or(after.len());
+        let tag = after[..end].trim_end_matches('/').trim().to_string();
+        if !tag.is_empty()
+            && tag.chars().next().is_some_and(|c| c.is_ascii_digit())
+            && seen.insert(tag.clone())
+        {
+            tags.push(tag);
+        }
+        rest = after;
+    }
+    tags
+}
+
+fn archive_asset_names() -> Vec<String> {
+    let mut names = Vec::new();
+    #[cfg(target_os = "windows")]
+    {
+        names.push("win64.exe.zip".to_string());
+        names.push("mono_win64.zip".to_string());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        names.push("macos.universal.zip".to_string());
+        names.push("mono_macos.universal.zip".to_string());
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(arch) = LINUX_ARCH_TOKEN {
+        let (std, mono) = match arch {
+            "x86_64" => ("linux.x86_64.zip", "mono_linux_x86_64.zip"),
+            "x86_32" => ("linux.x86_32.zip", "mono_linux_x86_32.zip"),
+            "arm64" => ("linux.arm64.zip", "mono_linux_arm64.zip"),
+            "arm32" => ("linux.arm32.zip", "mono_linux_arm32.zip"),
+            _ => ("", ""),
+        };
+        if !std.is_empty() {
+            names.push(std.to_string());
+            names.push(mono.to_string());
+        }
+    }
+    names
+}
+
+async fn fetch_archive_assets(client: &reqwest::Client, tag: &str) -> Vec<GodotReleaseAsset> {
+    let mut assets = Vec::new();
+    for suffix in archive_asset_names() {
+        let name = format!("Godot_v{tag}_{suffix}");
+        let url = format!("https://github.com/godotengine/godot/releases/download/{tag}/{name}");
+        let Ok(resp) = client.head(&url).send().await else {
+            continue;
+        };
+        if !resp.status().is_success() {
+            continue;
+        }
+        let size = resp
+            .headers()
+            .get(reqwest::header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(0);
+        assets.push(GodotReleaseAsset {
+            name,
+            download_url: url,
+            size,
+            is_mono: suffix.contains("mono"),
+        });
+    }
+    assets
 }
 
 pub(crate) fn meets_min_version(tag: &str) -> bool {
@@ -490,6 +637,31 @@ pub fn download_godot_version(
     } else {
         let _ = app.emit("godot-download-queued", &key);
     }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn reorder_download_queue(
+    app: AppHandle,
+    key: String,
+    direction: i8,
+) -> Result<(), String> {
+    let order = {
+        let mut mgr = dm().lock().unwrap();
+        let idx = mgr
+            .queue
+            .iter()
+            .position(|k| k == &key)
+            .ok_or("Not queued")?;
+        let max = mgr.queue.len() as isize - 1;
+        let target = (idx as isize + direction as isize).clamp(0, max) as usize;
+        if idx != target {
+            let k = mgr.queue.remove(idx).unwrap_or_default();
+            mgr.queue.insert(target, k);
+        }
+        mgr.queue.iter().cloned().collect::<Vec<String>>()
+    };
+    let _ = app.emit("godot-download-queue", order);
     Ok(())
 }
 
@@ -642,60 +814,71 @@ async fn run_download(app: AppHandle, key: String) {
 
     let app2 = app.clone();
     let job2 = job.clone();
-    let result = tokio::task::spawn_blocking(move || -> Result<InstalledGodotVersion, String> {
-        let zip_file = fs::File::open(&zip_path).map_err(|e| e.to_string())?;
-        let mut archive = zip::ZipArchive::new(zip_file).map_err(|e| e.to_string())?;
-        archive.extract(&target_dir).map_err(|e| e.to_string())?;
-        let _ = fs::remove_file(&zip_path);
-
-        let exe_path = find_executable(&target_dir)
-            .ok_or_else(|| "Could not locate Godot executable after extraction".to_string())?;
-
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if let Ok(meta) = fs::metadata(&exe_path) {
-                let mut perms = meta.permissions();
-                perms.set_mode(0o755);
-                let _ = fs::set_permissions(&exe_path, perms);
-            }
-        }
-
-        let version_number = job2
-            .tag
-            .split('-')
-            .next()
-            .unwrap_or(&job2.tag)
-            .trim_start_matches('v')
-            .to_string();
-        let is_mono = job2.asset_name.to_lowercase().contains("mono");
-        let installed = InstalledGodotVersion {
-            tag: if is_mono {
-                format!("{}-mono", job2.tag)
-            } else {
-                job2.tag.clone()
-            },
-            version: version_number,
-            executable_path: exe_path.to_string_lossy().to_string(),
-            is_mono,
-            installed_at: chrono::Utc::now().to_rfc3339(),
-            custom_name: None,
-            install_root: Some(target_dir.to_string_lossy().to_string()),
-            supports_console: false,
-        };
-        register_version(&app2, installed.clone()).map_err(|e| e.to_string())?;
-        crate::projects::rebind_projects_to_version(&app2, &installed);
-        Ok(installed)
-    }).await;
+    let target2 = target_dir.clone();
+    let result = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        install_version_archive(&app2, &job2, &zip_path, &target2)
+    })
+    .await;
 
     match result {
-        Ok(Ok(_)) => {
+        Ok(Ok(())) => {
             release_slot(&app, &key, true);
             let _ = app.emit("godot-download-complete", &key);
         }
         Ok(Err(e)) => finish_with_error(&app, &key, e),
         Err(e) => finish_with_error(&app, &key, e.to_string()),
     }
+}
+
+fn install_version_archive(
+    app: &AppHandle,
+    job: &DownloadJob,
+    zip_path: &Path,
+    target_dir: &Path,
+) -> Result<(), String> {
+    let zip_file = fs::File::open(zip_path).map_err(|e| e.to_string())?;
+    let mut archive = zip::ZipArchive::new(zip_file).map_err(|e| e.to_string())?;
+    archive.extract(&target_dir).map_err(|e| e.to_string())?;
+    let _ = fs::remove_file(zip_path);
+
+    let exe_path = find_executable(&target_dir)
+        .ok_or_else(|| "Could not locate Godot executable after extraction".to_string())?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = fs::metadata(&exe_path) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            let _ = fs::set_permissions(&exe_path, perms);
+        }
+    }
+
+    let version_number = job
+        .tag
+        .split('-')
+        .next()
+        .unwrap_or(&job.tag)
+        .trim_start_matches('v')
+        .to_string();
+    let is_mono = job.asset_name.to_lowercase().contains("mono");
+    let installed = InstalledGodotVersion {
+        tag: if is_mono {
+            format!("{}-mono", job.tag)
+        } else {
+            job.tag.clone()
+        },
+        version: version_number,
+        executable_path: exe_path.to_string_lossy().to_string(),
+        is_mono,
+        installed_at: chrono::Utc::now().to_rfc3339(),
+        custom_name: None,
+        install_root: Some(target_dir.to_string_lossy().to_string()),
+        supports_console: false,
+    };
+    register_version(app, installed.clone()).map_err(|e| e.to_string())?;
+    crate::projects::rebind_projects_to_version(app, &installed);
+    Ok(())
 }
 
 pub fn find_executable(dir: &Path) -> Option<PathBuf> {
@@ -744,45 +927,98 @@ pub fn console_executable_for(exe: &Path) -> Option<PathBuf> {
     candidate.is_file().then_some(candidate)
 }
 
-pub fn migrate_mono_tags(app: &AppHandle) {
-    let mut list = read_registry(app);
-    let mut changed = false;
+fn migrate_mono_tags_in_place(
+    list: &mut Vec<InstalledGodotVersion>,
+    projects: &mut Vec<Project>,
+) -> (bool, bool) {
+    let mut renamed_old_tags: Vec<String> = Vec::new();
+    let mut registry_changed = false;
     for v in list.iter_mut() {
         if v.is_mono && !v.tag.ends_with("-mono") {
+            renamed_old_tags.push(v.tag.clone());
             v.tag = format!("{}-mono", v.tag);
-            changed = true;
+            registry_changed = true;
         }
-    }
-    if changed {
-        let _ = write_registry(app, &list);
     }
 
-    let mut projects = crate::projects::read_projects(app);
-    let mut project_changed = false;
-    for v in &list {
-        if !v.is_mono || !v.tag.ends_with("-mono") {
-            continue;
-        }
-        let base = v.tag.trim_end_matches("-mono");
-        let has_standard_still = list.iter().any(|other| !other.is_mono && other.tag == base);
+    if !registry_changed {
+        return (false, false);
+    }
+
+    let mut projects_changed = false;
+    for old_tag in &renamed_old_tags {
+        let has_standard_still = list.iter().any(|other| !other.is_mono && other.tag == *old_tag);
         if has_standard_still {
             continue;
         }
+        let new_tag = format!("{}-mono", old_tag);
         for p in projects.iter_mut() {
-            if p.godot_version == base {
-                p.godot_version = v.tag.clone();
-                project_changed = true;
+            if p.godot_version == *old_tag {
+                p.godot_version = new_tag.clone();
+                projects_changed = true;
             }
         }
     }
-    if project_changed {
+    (registry_changed, projects_changed)
+}
+
+pub fn migrate_mono_tags(app: &AppHandle) {
+    let mut list = read_registry(app);
+    let mut projects = crate::projects::read_projects(app);
+    let (registry_changed, projects_changed) = migrate_mono_tags_in_place(&mut list, &mut projects);
+    if registry_changed {
+        let _ = write_registry(app, &list);
+    }
+    if projects_changed {
         let _ = crate::projects::write_projects(app, &projects);
     }
 }
 
+fn installed_signature() -> &'static Mutex<Option<String>> {
+    static SIG: OnceLock<Mutex<Option<String>>> = OnceLock::new();
+    SIG.get_or_init(|| Mutex::new(None))
+}
+
+fn registry_signature(raw: &str) -> String {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return raw.to_string();
+    };
+    let arr = value.as_array().map(|a| a.as_slice()).unwrap_or(&[]);
+    let mut parts: Vec<String> = arr
+        .iter()
+        .filter_map(|e| {
+            let tag = e.get("tag")?.as_str()?;
+            let path = e.get("executable_path").and_then(|x| x.as_str()).unwrap_or("");
+            let mono = e.get("is_mono").and_then(|x| x.as_bool()).unwrap_or(false);
+            let custom = e.get("custom_name").and_then(|x| x.as_str()).unwrap_or("");
+            Some(format!("{tag}|{path}|{mono}|{custom}"))
+        })
+        .collect();
+    parts.sort();
+    parts.join("\n")
+}
+
 #[tauri::command]
 pub fn list_installed_godot_versions(app: AppHandle) -> Result<Vec<InstalledGodotVersion>, String> {
-    migrate_mono_tags(&app);
+    let file = registry_file(&app);
+    let raw = fs::read_to_string(&file).unwrap_or_default();
+    let sig = registry_signature(&raw);
+
+    let needs_reconcile = {
+        let sig_lock = installed_signature().lock().unwrap();
+        match sig_lock.as_ref() {
+            Some(cached) => cached != &sig,
+            None => true,
+        }
+    };
+
+    if needs_reconcile {
+        migrate_mono_tags(&app);
+        crate::projects::rebind_projects_to_installed(&app);
+        let raw = fs::read_to_string(&file).unwrap_or_default();
+        *installed_signature().lock().unwrap() = Some(registry_signature(&raw));
+    }
+
     Ok(prune_missing(&app))
 }
 
@@ -1009,7 +1245,8 @@ pub struct RateLimitInfo {
 #[tauri::command]
 pub async fn test_github_token(app: AppHandle) -> Result<RateLimitInfo, String> {
     let settings = crate::settings::read_settings(&app);
-    let token = settings.github_token.filter(|t| !t.trim().is_empty());
+    let token = crate::git_auth::github_oauth_token(&app)
+        .or_else(|| settings.github_token.filter(|t| !t.trim().is_empty()));
 
     let client = reqwest::Client::builder()
         .user_agent("godot-hub/1.0")
@@ -1173,3 +1410,4 @@ fn supports_console(exe: &Path) -> bool {
 fn supports_console(_exe: &Path) -> bool {
     true
 }
+

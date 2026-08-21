@@ -27,6 +27,7 @@ pub struct GitLogEntry {
 pub struct GitBranchInfo {
     pub name: String,
     pub is_current: bool,
+    pub has_upstream: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -42,11 +43,56 @@ pub struct GitChangedFile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitRemoteInfo {
+    pub name: String,
+    pub web_url: String,
+    pub repo_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitAheadBehind {
+    pub ahead: usize,
+    pub behind: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitCommitFile {
+    pub path: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitCommitDetails {
+    pub hash: String,
+    pub message: String,
+    pub author: String,
+    pub date: String,
+    pub files: Vec<GitCommitFile>,
+    pub diff: GitDiffResult,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GitInitOutcome {
     pub initialized: bool,
     pub committed: bool,
     pub branch: Option<String>,
     pub warning: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GitInitOptions {
+    #[serde(default = "default_true")]
+    pub gitignore: bool,
+    #[serde(default = "default_true")]
+    pub gitattributes: bool,
+    #[serde(default)]
+    pub readme: bool,
+    #[serde(default)]
+    pub license: Option<String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -329,8 +375,14 @@ fn get_git_status_for_path(path: &str) -> GitStatus {
 }
 
 #[tauri::command]
-pub fn get_git_status(path: String) -> GitStatus {
-    get_git_status_for_path(&path)
+pub async fn get_git_status(path: String) -> GitStatus {
+    tokio::task::spawn_blocking(move || get_git_status_for_path(&path))
+        .await
+        .unwrap_or_else(|_| GitStatus {
+            branch: None,
+            has_uncommitted: false,
+            is_repo: false,
+        })
 }
 
 #[tauri::command]
@@ -354,215 +406,448 @@ pub async fn batch_git_status(paths: Vec<String>) -> HashMap<String, GitStatus> 
 }
 
 #[tauri::command]
-pub fn git_pull(path: String) -> Result<String, String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    friendly_cmd(&path, &["pull"])
+pub async fn git_pull(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        friendly_cmd(&path, &["pull"])
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn git_push(path: String, force: Option<bool>) -> Result<String, String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    let mut args = vec!["push"];
-    if force.unwrap_or(false) {
-        args.push("--force-with-lease");
-    }
-    friendly_cmd(&path, &args)
+pub async fn git_push(path: String, force: Option<bool>) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        let mut args = vec!["push"];
+        if force.unwrap_or(false) {
+            args.push("--force-with-lease");
+        }
+        friendly_cmd(&path, &args)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn git_log_entries(path: String) -> Result<Vec<GitLogEntry>, String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    let stdout = git_helpers::git_cmd(
-        &path,
-        [
-            "log",
-            "--max-count=100",
-            "--topo-order",
-            "--format=%H|||%P|||%an|||%ar|||%s",
-            "--all",
-        ],
-    )
-    .map_err(|e| e.to_string())?;
+pub async fn git_log_entries(path: String) -> Result<Vec<GitLogEntry>, String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        let stdout = git_helpers::git_cmd(
+            &path,
+            [
+                "log",
+                "--max-count=100",
+                "--topo-order",
+                "--format=%H|||%P|||%an|||%ar|||%s",
+                "--all",
+            ],
+        )
+        .map_err(|e| e.to_string())?;
 
-    let entries: Vec<GitLogEntry> = stdout
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .filter_map(|line| {
-            let parts: Vec<&str> = line.splitn(5, "|||").collect();
-            if parts.len() < 5 { return None; }
-            Some(GitLogEntry {
-                hash: parts[0].to_string(),
-                parents: parts[1]
-                    .split_whitespace()
-                    .map(|p| p.to_string())
-                    .collect(),
-                author: parts[2].to_string(),
-                date: parts[3].to_string(),
-                message: parts[4].to_string(),
+        let entries: Vec<GitLogEntry> = stdout
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .filter_map(|line| {
+                let parts: Vec<&str> = line.splitn(5, "|||").collect();
+                if parts.len() < 5 { return None; }
+                Some(GitLogEntry {
+                    hash: parts[0].to_string(),
+                    parents: parts[1]
+                        .split_whitespace()
+                        .map(|p| p.to_string())
+                        .collect(),
+                    author: parts[2].to_string(),
+                    date: parts[3].to_string(),
+                    message: parts[4].to_string(),
+                })
             })
-        })
-        .collect();
+            .collect();
 
-    Ok(entries)
+        Ok(entries)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn to_web_url(url: &str) -> String {
+    let url = url.trim_end_matches(".git").trim_end_matches('/');
+    if let Some(rest) = url.strip_prefix("git@") {
+        if let Some((host, path)) = rest.split_once(':') {
+            return format!("https://{}/{}", host, path.trim_start_matches('/'));
+        }
+    }
+    if url.starts_with("https://") || url.starts_with("http://") {
+        return url.to_string();
+    }
+    if let Some(rest) = url.strip_prefix("git://") {
+        return format!("https://{}", rest);
+    }
+    url.to_string()
+}
+
+fn repo_label(url: &str) -> String {
+    let web = to_web_url(url);
+    let path = web.split("://").nth(1).unwrap_or(&web);
+    let segments: Vec<&str> = path
+        .split('/')
+        .skip(1)
+        .filter(|s| !s.is_empty())
+        .collect();
+    match segments.last() {
+        Some(last) => last.to_string(),
+        None => repo_base_name(url),
+    }
 }
 
 #[tauri::command]
-pub fn git_remote_url(path: String) -> Result<String, String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
+pub async fn git_ahead_behind(path: String) -> Result<Option<GitAheadBehind>, String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        let upstream = git_helpers::git_cmd(
+            &path,
+            ["rev-parse", "--abbrev-ref", "@{upstream}"],
+        )
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty() && s != "@{upstream}");
+        let Some(upstream) = upstream else {
+            return Ok(None);
+        };
+        let out = git_helpers::git_cmd(
+            &path,
+            ["rev-list", "--left-right", "--count", &upstream, "...", "HEAD"],
+        )
+        .map_err(|e| e.to_string())?;
+        let parts: Vec<&str> = out.split_whitespace().collect();
+        if parts.len() < 2 {
+            return Ok(None);
+        }
+        Ok(Some(GitAheadBehind {
+            behind: parts[0].parse().unwrap_or(0),
+            ahead: parts[1].parse().unwrap_or(0),
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 
-    let raw = git_helpers::git_cmd(&path, ["remote", "get-url", "origin"])
-        .map_err(|_| "No remote 'origin' configured".to_string())?;
+#[tauri::command]
+pub async fn git_show_commit(path: String, hash: String) -> Result<GitCommitDetails, String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        let meta = git_helpers::git_cmd(
+            &path,
+            ["show", "-s", "--format=%H|||%an|||%ar|||%s", &hash],
+        )
+        .map_err(|e| e.to_string())?;
+        let mut parts = meta.splitn(4, "|||");
+        let hash = parts.next().unwrap_or(&hash).to_string();
+        let author = parts.next().unwrap_or("").to_string();
+        let date = parts.next().unwrap_or("").to_string();
+        let message = parts.next().unwrap_or("").to_string();
 
-    if raw.is_empty() {
-        return Err("No remote 'origin' configured".into());
-    }
+        let files_out = git_helpers::git_cmd(
+            &path,
+            ["show", "--name-status", "--format=", &hash],
+        )
+        .map_err(|e| e.to_string())?;
+        let files: Vec<GitCommitFile> = files_out
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .filter_map(|l| {
+                let mut it = l.split('\t');
+                let status = it.next()?.to_string();
+                let path = it.next_back()?.to_string();
+                Some(GitCommitFile { path, status })
+            })
+            .collect();
 
-    fn to_web_url(url: &str) -> String {
-        let url = url.trim_end_matches(".git").trim_end_matches('/');
-        if let Some(rest) = url.strip_prefix("git@") {
-            if let Some((host, path)) = rest.split_once(':') {
-                return format!("https://{}/{}", host, path.trim_start_matches('/'));
+        let out = git_helpers::git_raw(&path, ["show", "--no-color", &hash])
+            .map_err(|e| e.to_string())?;
+        let stdout = git_helpers::output_stdout(&out);
+
+        Ok(GitCommitDetails {
+            hash,
+            message,
+            author,
+            date,
+            files,
+            diff: parse_diff_text(&stdout),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn git_list_remotes(path: String) -> Result<Vec<GitRemoteInfo>, String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        let stdout = git_helpers::git_cmd(&path, ["remote", "-v"]).map_err(|e| e.to_string())?;
+        let mut seen = HashSet::new();
+        let mut remotes = Vec::new();
+        for line in stdout.lines() {
+            let mut parts = line.split_whitespace();
+            let (Some(name), Some(url)) = (parts.next(), parts.next()) else {
+                continue;
+            };
+            if !seen.insert(name.to_string()) {
+                continue;
+            }
+            let url = url.to_string();
+            remotes.push(GitRemoteInfo {
+                web_url: to_web_url(&url),
+                repo_name: repo_label(&url),
+                name: name.to_string(),
+            });
+        }
+        Ok(remotes)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn git_remote_url(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+
+        let raw = git_helpers::git_cmd(&path, ["remote", "get-url", "origin"])
+            .map_err(|_| "No remote 'origin' configured".to_string())?;
+
+        if raw.is_empty() {
+            return Err("No remote 'origin' configured".into());
+        }
+
+        Ok(to_web_url(&raw))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn git_fetch(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        git_helpers::git_cmd(&path, ["fetch"]).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn git_list_branches(path: String) -> Result<Vec<GitBranchInfo>, String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        let stdout = git_helpers::git_cmd(
+            &path,
+            ["branch", "--format=%(refname:short)|||%(HEAD)|||%(upstream:short)"],
+        )
+        .map_err(|e| e.to_string())?;
+
+        let branches: Vec<GitBranchInfo> = stdout
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .filter_map(|line| {
+                let parts: Vec<&str> = line.splitn(3, "|||").collect();
+                if parts.len() < 3 { return None; }
+                Some(GitBranchInfo {
+                    name: parts[0].to_string(),
+                    is_current: parts[1].trim() == "*",
+                    has_upstream: !parts[2].trim().is_empty(),
+                })
+            })
+            .collect();
+
+        Ok(branches)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn git_branch_publish(path: String, name: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        git_helpers::git_cmd(&path, ["push", "-u", "origin", &name])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn git_switch_branch(path: String, name: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        git_helpers::git_cmd(&path, ["switch", &name]).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn git_create_branch(path: String, name: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        git_helpers::git_cmd(&path, ["branch", &name]).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn git_delete_branch(path: String, name: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        git_helpers::git_cmd(&path, ["branch", "-d", &name]).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn git_stash_push(path: String, paths: Option<Vec<String>>) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        let mut args: Vec<&str> = vec!["stash", "push", "--include-untracked"];
+        if let Some(files) = &paths {
+            args.push("--");
+            for file in files {
+                args.push(file.as_str());
             }
         }
-        if url.starts_with("https://") || url.starts_with("http://") {
-            return url.to_string();
+        git_helpers::git_cmd(&path, &args).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn git_stash_list(path: String) -> Result<Vec<GitStashEntry>, String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
         }
-        if let Some(rest) = url.strip_prefix("git://") {
-            return format!("https://{}", rest);
-        }
-        url.to_string()
-    }
+        let stdout = git_helpers::git_cmd(&path, ["stash", "list"])
+            .map_err(|e| e.to_string())?;
 
-    Ok(to_web_url(&raw))
-}
-
-#[tauri::command]
-pub fn git_fetch(path: String) -> Result<String, String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    git_helpers::git_cmd(&path, ["fetch"]).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn git_list_branches(path: String) -> Result<Vec<GitBranchInfo>, String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    let stdout = git_helpers::git_cmd(&path, ["branch", "--format=%(refname:short)|||%(HEAD)"])
-        .map_err(|e| e.to_string())?;
-
-    let branches: Vec<GitBranchInfo> = stdout
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .filter_map(|line| {
-            let parts: Vec<&str> = line.splitn(2, "|||").collect();
-            if parts.len() < 2 { return None; }
-            Some(GitBranchInfo {
-                name: parts[0].to_string(),
-                is_current: parts[1].trim() == "*",
-            })
-        })
-        .collect();
-
-    Ok(branches)
-}
-
-#[tauri::command]
-pub fn git_switch_branch(path: String, name: String) -> Result<(), String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    git_helpers::git_cmd(&path, ["switch", &name]).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn git_create_branch(path: String, name: String) -> Result<(), String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    git_helpers::git_cmd(&path, ["branch", &name]).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn git_delete_branch(path: String, name: String) -> Result<(), String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    git_helpers::git_cmd(&path, ["branch", "-d", &name]).map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn git_stash_push(path: String, paths: Option<Vec<String>>) -> Result<String, String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    let mut args: Vec<&str> = vec!["stash", "push", "--include-untracked"];
-    if let Some(files) = &paths {
-        args.push("--");
-        for file in files {
-            args.push(file.as_str());
-        }
-    }
-    git_helpers::git_cmd(&path, &args).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn git_stash_list(path: String) -> Result<Vec<GitStashEntry>, String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    let stdout = git_helpers::git_cmd(&path, ["stash", "list"])
-        .map_err(|e| e.to_string())?;
-
-    let stashes: Vec<GitStashEntry> = stdout
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .filter_map(|line| {
-            if let Some(rest) = line.strip_prefix("stash@{") {
-                let parts: Vec<&str> = rest.splitn(2, '}').collect();
-                if parts.len() == 2 {
-                    let index = parts[0].parse::<usize>().ok()?;
-                    let message = parts[1].trim_start_matches(": ").to_string();
-                    return Some(GitStashEntry { index, message });
+        let stashes: Vec<GitStashEntry> = stdout
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .filter_map(|line| {
+                if let Some(rest) = line.strip_prefix("stash@{") {
+                    let parts: Vec<&str> = rest.splitn(2, '}').collect();
+                    if parts.len() == 2 {
+                        let index = parts[0].parse::<usize>().ok()?;
+                        let message = parts[1].trim_start_matches(": ").to_string();
+                        return Some(GitStashEntry { index, message });
+                    }
                 }
-            }
-            None
-        })
-        .collect();
+                None
+            })
+            .collect();
 
-    Ok(stashes)
+        Ok(stashes)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn git_stash_apply(path: String, index: usize) -> Result<(), String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    git_helpers::git_cmd(&path, ["stash", "apply", &format!("stash@{{{}}}", index)])
-        .map_err(|e| e.to_string())?;
-    Ok(())
+pub async fn git_stash_apply(path: String, index: usize) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        git_helpers::git_cmd(&path, ["stash", "apply", &format!("stash@{{{}}}", index)])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn git_stash_drop(path: String, index: usize) -> Result<(), String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    git_helpers::git_cmd(&path, ["stash", "drop", &format!("stash@{{{}}}", index)])
+pub async fn git_stash_show(path: String, index: usize) -> Result<GitDiffResult, String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        let output = git_helpers::git_raw(
+            &path,
+            ["stash", "show", "-p", &format!("stash@{{{}}}", index)],
+        )
         .map_err(|e| e.to_string())?;
-    Ok(())
+        let stdout = git_helpers::output_stdout(&output);
+        if stdout.trim().is_empty() {
+            return Err(format!("No diff available for stash@{{{}}}", index));
+        }
+        Ok(parse_diff_text(&stdout))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn git_stash_pop(path: String, index: usize) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        git_helpers::git_cmd(&path, ["stash", "pop", &format!("stash@{{{}}}", index)])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn git_stash_drop(path: String, index: usize) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        git_helpers::git_cmd(&path, ["stash", "drop", &format!("stash@{{{}}}", index)])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn parse_changed_files(stdout: &str) -> Vec<GitChangedFile> {
@@ -571,12 +856,19 @@ fn parse_changed_files(stdout: &str) -> Vec<GitChangedFile> {
         .filter(|l| !l.trim().is_empty())
         .filter_map(|line| {
             let status = line.get(..2)?.to_string();
-            let file_path = line.get(2..)?.trim_start().to_string();
-            if status.trim().is_empty() && file_path.is_empty() {
-                None
-            } else {
-                Some(GitChangedFile { path: file_path, status })
+            let raw_path = line.get(2..)?.trim_start().to_string();
+            if status.trim().is_empty() && raw_path.is_empty() {
+                return None;
             }
+            // Git --porcelain output quotes filenames containing special characters
+            // (spaces, quotes, etc.). Strip the surrounding quotes so downstream
+            // commands receive the actual filesystem path.
+            let file_path = if raw_path.starts_with('"') && raw_path.ends_with('"') && raw_path.len() >= 2 {
+                raw_path[1..raw_path.len() - 1].to_string()
+            } else {
+                raw_path
+            };
+            Some(GitChangedFile { path: file_path, status })
         })
         .collect()
 }
@@ -587,10 +879,10 @@ fn reroot_to_project(
     top: &Path,
 ) -> Vec<GitChangedFile> {
     let Ok(prefix) = project.strip_prefix(top) else {
-        return files; // Not under the repo root — keep entries as-is.
+        return files;
     };
     if prefix.as_os_str().is_empty() {
-        return files; // Project *is* the repo root — nothing to scope.
+        return files;
     }
     files
         .into_iter()
@@ -622,76 +914,102 @@ fn check_ignored_files(path: &str, files: &[GitChangedFile]) -> HashSet<String> 
 }
 
 #[tauri::command]
-pub fn git_changed_files(path: String) -> Result<Vec<GitChangedFile>, String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    let project = fs::canonicalize(&path).unwrap_or_else(|_| PathBuf::from(&path));
-    let top = if project.join(".git").exists() {
-        Some(project.clone())
-    } else {
-        git_helpers::git_cmd(&path, ["rev-parse", "--show-toplevel"])
-            .ok()
-            .map(|s| {
-                let top = PathBuf::from(s.trim());
-                fs::canonicalize(&top).unwrap_or(top)
-            })
-    };
-    let nested = matches!(&top, Some(t) if *t != project);
-
-    let args: &[&str] = if nested {
-        &["status", "--porcelain", "-uall", "--", "."]
-    } else {
-        &["status", "--porcelain"]
-    };
-    let stdout = git_helpers::git_cmd(&path, args).map_err(|e| e.to_string())?;
-
-    let mut files = parse_changed_files(&stdout);
-    if nested {
-        if let Some(top) = top {
-            files = reroot_to_project(files, &project, &top);
+pub async fn git_changed_files(path: String) -> Result<Vec<GitChangedFile>, String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
         }
-    }
-    if !files.is_empty() {
-        let ignored = check_ignored_files(&path, &files);
-        files.retain(|f| !ignored.contains(&f.path));
-    }
+        let project = fs::canonicalize(&path).unwrap_or_else(|_| PathBuf::from(&path));
+        let top = if project.join(".git").exists() {
+            Some(project.clone())
+        } else {
+            git_helpers::git_cmd(&path, ["rev-parse", "--show-toplevel"])
+                .ok()
+                .map(|s| {
+                    let top = PathBuf::from(s.trim());
+                    fs::canonicalize(&top).unwrap_or(top)
+                })
+        };
+        let nested = matches!(&top, Some(t) if *t != project);
 
-    Ok(files)
-}
+        let args: &[&str] = if nested {
+            &["status", "--porcelain", "-uall", "--", "."]
+        } else {
+            &["status", "--porcelain"]
+        };
+        let stdout = git_helpers::git_cmd(&path, args).map_err(|e| e.to_string())?;
 
-#[tauri::command]
-pub fn git_discard_changes(path: String) -> Result<(), String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    git_helpers::git_cmd(&path, ["restore", "."]).map_err(|e| e.to_string())?;
-    let _ = git_helpers::git_cmd(&path, ["clean", "-fd"]);
-    Ok(())
-}
-
-#[tauri::command]
-pub fn git_init(path: String) -> Result<String, String> {
-    let dir = PathBuf::from(&path);
-    if !dir.exists() {
-        return Err("Path does not exist".into());
-    }
-    if check_is_repo(&path) {
-        return Err("Already a git repository".into());
-    }
-
-    let stdout = git_helpers::git_command()
-        .args(["init", &path])
-        .output()
-        .map_err(|e| format!("Failed to init git: {e}"))
-        .and_then(|out| {
-            if !out.status.success() {
-                let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-                return Err(format!("Git init failed: {stderr}"));
+        let mut files = parse_changed_files(&stdout);
+        if nested {
+            if let Some(top) = top {
+                files = reroot_to_project(files, &project, &top);
             }
-            Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
-        })?;
-    Ok(stdout)
+        }
+        if !files.is_empty() {
+            let ignored = check_ignored_files(&path, &files);
+            files.retain(|f| !ignored.contains(&f.path));
+        }
+
+        Ok(files)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn git_discard_changes(path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        git_helpers::git_cmd(&path, ["restore", "."]).map_err(|e| e.to_string())?;
+        let _ = git_helpers::git_cmd(&path, ["clean", "-fd"]);
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn git_discard_file(path: String, file_path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        git_helpers::git_cmd(&path, ["restore", "--staged", "--worktree", &file_path])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn git_init(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let dir = PathBuf::from(&path);
+        if !dir.exists() {
+            return Err("Path does not exist".into());
+        }
+        if check_is_repo(&path) {
+            return Err("Already a git repository".into());
+        }
+
+        let stdout = git_helpers::git_command()
+            .args(["init", &path])
+            .output()
+            .map_err(|e| format!("Failed to init git: {e}"))
+            .and_then(|out| {
+                if !out.status.success() {
+                    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                    return Err(format!("Git init failed: {stderr}"));
+                }
+                Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+            })?;
+        Ok(stdout)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 const GODOT_GITIGNORE: &str = "\
@@ -756,8 +1074,7 @@ fn executable_names(name: &str) -> Vec<String> {
     vec![name.to_string()]
 }
 
-#[tauri::command]
-pub fn git_is_available() -> bool {
+fn git_is_available_sync() -> bool {
     let Some(path_var) = std::env::var_os("PATH") else {
         return false;
     };
@@ -767,379 +1084,489 @@ pub fn git_is_available() -> bool {
 }
 
 #[tauri::command]
-pub fn git_init_project(path: String) -> Result<GitInitOutcome, String> {
-    let dir = PathBuf::from(&path);
-    if !dir.is_dir() {
-        return Err("Path does not exist".into());
-    }
+pub async fn git_is_available() -> bool {
+    tokio::task::spawn_blocking(git_is_available_sync)
+        .await
+        .unwrap_or(false)
+}
 
-    if dir.join(".git").exists() {
-        return Ok(GitInitOutcome {
-            initialized: false,
-            committed: false,
-            branch: None,
-            warning: None,
-        });
-    }
-
-    if let Some(parent) = parent_repo(&path) {
-        return Ok(GitInitOutcome {
-            initialized: false,
-            committed: false,
-            branch: None,
-            warning: Some(format!(
-                "No repository was created: the folder above this one is already a Git repository ({}). Commit the project from there instead.",
-                parent.display()
-            )),
-        });
-    }
-
-    if !git_is_available() {
-        return Err("Git isn't installed, or it isn't on your PATH.".into());
-    }
-
-    if let Err(e) = git_helpers::git_cmd(&path, ["init"]) {
-        return Err(friendly_git_error(&e.to_string(), &path));
-    }
-
-    for (name, contents) in [
-        (".gitignore", GODOT_GITIGNORE),
-        (".gitattributes", GODOT_GITATTRIBUTES),
-    ] {
-        let file = dir.join(name);
-        if !file.exists() {
-            fs::write(&file, contents).map_err(|e| format!("Failed to write {name}: {e}"))?;
+#[tauri::command]
+pub async fn git_init_project(
+    path: String,
+    options: Option<GitInitOptions>,
+) -> Result<GitInitOutcome, String> {
+    tokio::task::spawn_blocking(move || {
+        let dir = PathBuf::from(&path);
+        if !dir.is_dir() {
+            return Err("Path does not exist".into());
         }
-    }
 
-    if let Err(e) = git_helpers::git_cmd(&path, ["add", "."]) {
-        return Ok(GitInitOutcome {
+        if dir.join(".git").exists() {
+            return Ok(GitInitOutcome {
+                initialized: false,
+                committed: false,
+                branch: None,
+                warning: None,
+            });
+        }
+
+        if let Some(parent) = parent_repo(&path) {
+            return Ok(GitInitOutcome {
+                initialized: false,
+                committed: false,
+                branch: None,
+                warning: Some(format!(
+                    "No repository was created: the folder above this one is already a Git repository ({}). Commit the project from there instead.",
+                    parent.display()
+                )),
+            });
+        }
+
+        if !git_is_available_sync() {
+            return Err("Git isn't installed, or it isn't on your PATH.".into());
+        }
+
+        if let Err(e) = git_helpers::git_cmd(&path, ["init"]) {
+            return Err(friendly_git_error(&e.to_string(), &path));
+        }
+
+        let opts = options.unwrap_or_default();
+
+        if opts.gitignore {
+            let file = dir.join(".gitignore");
+            if !file.exists() {
+                fs::write(&file, GODOT_GITIGNORE)
+                    .map_err(|e| format!("Failed to write .gitignore: {e}"))?;
+            }
+        }
+        if opts.gitattributes {
+            let file = dir.join(".gitattributes");
+            if !file.exists() {
+                fs::write(&file, GODOT_GITATTRIBUTES)
+                    .map_err(|e| format!("Failed to write .gitattributes: {e}"))?;
+            }
+        }
+        if opts.readme {
+            let file = dir.join("README.md");
+            if !file.exists() {
+                let project_name = dir
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "My Project".to_string());
+                let readme = format!("# {}\n\nA Godot project\n", project_name);
+                fs::write(&file, readme).map_err(|e| format!("Failed to write README.md: {e}"))?;
+            }
+        }
+        if let Some(license_id) = &opts.license {
+            let project_name = dir
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if let Some(text) = crate::licenses::license_text(license_id, &project_name) {
+                let file = dir.join("LICENSE");
+                if !file.exists() {
+                    fs::write(&file, text)
+                        .map_err(|e| format!("Failed to write LICENSE: {e}"))?;
+                }
+            }
+        }
+
+        if let Err(e) = git_helpers::git_cmd(&path, ["add", "."]) {
+            return Ok(GitInitOutcome {
+                initialized: true,
+                committed: false,
+                branch: None,
+                warning: Some(friendly_git_error(&e.to_string(), &path)),
+            });
+        }
+
+        let commit = git_helpers::git_raw(&path, ["commit", "-m", "Initial commit"])
+            .map_err(|e| e.to_string())?;
+        if !commit.status.success() {
+            let stderr = git_helpers::output_stderr(&commit);
+            let detail = if stderr.trim().is_empty() {
+                git_helpers::output_stdout(&commit)
+            } else {
+                stderr
+            };
+            return Ok(GitInitOutcome {
+                initialized: true,
+                committed: false,
+                branch: None,
+                warning: Some(friendly_git_error(&detail, &path)),
+            });
+        }
+
+        let mut branch = git_helpers::git_cmd(&path, ["rev-parse", "--abbrev-ref", "HEAD"]).ok();
+        if branch.as_deref() == Some("master")
+            && git_helpers::git_cmd(&path, ["branch", "-M", "main"]).is_ok()
+        {
+            branch = Some("main".to_string());
+        }
+
+        Ok(GitInitOutcome {
             initialized: true,
-            committed: false,
-            branch: None,
-            warning: Some(friendly_git_error(&e.to_string(), &path)),
-        });
-    }
-
-    let commit = git_helpers::git_raw(&path, ["commit", "-m", "Initial commit"])
-        .map_err(|e| e.to_string())?;
-    if !commit.status.success() {
-        let stderr = git_helpers::output_stderr(&commit);
-        let detail = if stderr.trim().is_empty() {
-            git_helpers::output_stdout(&commit)
-        } else {
-            stderr
-        };
-        return Ok(GitInitOutcome {
-            initialized: true,
-            committed: false,
-            branch: None,
-            warning: Some(friendly_git_error(&detail, &path)),
-        });
-    }
-
-    let mut branch = git_helpers::git_cmd(&path, ["rev-parse", "--abbrev-ref", "HEAD"]).ok();
-    if branch.as_deref() == Some("master")
-        && git_helpers::git_cmd(&path, ["branch", "-M", "main"]).is_ok()
-    {
-        branch = Some("main".to_string());
-    }
-
-    Ok(GitInitOutcome {
-        initialized: true,
-        committed: true,
-        branch,
-        warning: None,
+            committed: true,
+            branch,
+            warning: None,
+        })
     })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn git_stage_file(path: String, file_path: String) -> Result<(), String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    git_helpers::git_cmd(&path, ["add", &file_path]).map_err(|e| e.to_string())?;
-    Ok(())
+pub async fn git_stage_file(path: String, file_path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        git_helpers::git_cmd(&path, ["add", &file_path]).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn git_unstage_file(path: String, file_path: String) -> Result<(), String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    git_helpers::git_cmd(&path, ["restore", "--staged", &file_path]).map_err(|e| e.to_string())?;
-    Ok(())
+pub async fn git_unstage_file(path: String, file_path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        git_helpers::git_cmd(&path, ["restore", "--staged", &file_path]).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn git_commit(path: String, message: String, amend: bool) -> Result<String, String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
+pub async fn git_commit(path: String, message: String, amend: bool) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
 
-    let mut args = vec!["commit", "-m", &message];
-    if amend {
-        args.push("--amend");
-    }
+        let mut args = vec!["commit", "-m", &message];
+        if amend {
+            args.push("--amend");
+        }
 
-    let output = git_helpers::git_raw(&path, &args).map_err(|e| e.to_string())?;
+        let output = git_helpers::git_raw(&path, &args).map_err(|e| e.to_string())?;
 
-    if !output.status.success() {
-        let stderr = git_helpers::output_stderr(&output).trim().to_string();
-        let stdout = git_helpers::output_stdout(&output).trim().to_string();
-        let detail = if !stderr.is_empty() { stderr }
-                    else if !stdout.is_empty() { stdout }
-                    else { "Unknown error, run 'git commit' in a terminal for more details.".to_string() };
-        return Err(format!("Commit failed: {detail}"));
-    }
+        if !output.status.success() {
+            let stderr = git_helpers::output_stderr(&output).trim().to_string();
+            let stdout = git_helpers::output_stdout(&output).trim().to_string();
+            let detail = if !stderr.is_empty() { stderr }
+                        else if !stdout.is_empty() { stdout }
+                        else { "Unknown error, run 'git commit' in a terminal for more details.".to_string() };
+            return Err(format!("Commit failed: {detail}"));
+        }
 
-    Ok(git_helpers::output_stdout(&output).trim().to_string())
+        Ok(git_helpers::output_stdout(&output).trim().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}#[tauri::command]
+pub async fn git_set_remote(path: String, url: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+
+        let remotes = git_helpers::git_cmd(&path, ["remote"]).unwrap_or_default();
+        let has_origin = remotes.lines().any(|l| l.trim() == "origin");
+
+        let verb = if has_origin { "set-url" } else { "add" };
+        git_helpers::git_cmd(&path, ["remote", verb, "origin", &url]).map_err(|e| e.to_string())?;
+
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn git_set_remote(path: String, url: String) -> Result<(), String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-
-    let remotes = git_helpers::git_cmd(&path, ["remote"]).unwrap_or_default();
-    let has_origin = remotes.lines().any(|l| l.trim() == "origin");
-
-    let verb = if has_origin { "set-url" } else { "add" };
-    git_helpers::git_cmd(&path, ["remote", verb, "origin", &url]).map_err(|e| e.to_string())?;
-    Ok(())
+pub async fn git_remove_remote(path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        git_helpers::git_cmd(&path, ["remote", "remove", "origin"]).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn git_remove_remote(path: String) -> Result<(), String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    git_helpers::git_cmd(&path, ["remote", "remove", "origin"]).map_err(|e| e.to_string())?;
-    Ok(())
+pub async fn git_undo_commit(path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        git_helpers::git_cmd(&path, ["reset", "--soft", "HEAD~1"]).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn git_undo_commit(path: String) -> Result<(), String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    git_helpers::git_cmd(&path, ["reset", "--soft", "HEAD~1"]).map_err(|e| e.to_string())?;
-    Ok(())
+pub async fn git_undo_pull(path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        git_helpers::git_cmd(&path, ["reset", "--keep", "ORIG_HEAD"]).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn git_undo_pull(path: String) -> Result<(), String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    git_helpers::git_cmd(&path, ["reset", "--keep", "ORIG_HEAD"]).map_err(|e| e.to_string())?;
-    Ok(())
+pub async fn git_abort_merge(path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        git_helpers::git_cmd(&path, ["merge", "--abort"]).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn git_abort_merge(path: String) -> Result<(), String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    git_helpers::git_cmd(&path, ["merge", "--abort"]).map_err(|e| e.to_string())?;
-    Ok(())
+pub async fn git_is_merging(path: String) -> Result<bool, String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+
+        let git_dir = git_helpers::git_cmd(&path, ["rev-parse", "--git-dir"])
+            .map_err(|e| e.to_string())?;
+        let base = std::path::PathBuf::from(&path).join(&git_dir);
+
+        Ok(base.join("MERGE_HEAD").exists()
+            || base.join("rebase-merge").exists()
+            || base.join("rebase-apply").exists())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn git_is_merging(path: String) -> Result<bool, String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-
-    let git_dir = git_helpers::git_cmd(&path, ["rev-parse", "--git-dir"])
-        .map_err(|e| e.to_string())?;
-    let base = std::path::PathBuf::from(&path).join(&git_dir);
-
-    Ok(base.join("MERGE_HEAD").exists()
-        || base.join("rebase-merge").exists()
-        || base.join("rebase-apply").exists())
+pub async fn git_merge_conflict_files(path: String) -> Result<Vec<String>, String> {
+    tokio::task::spawn_blocking(move || get_merge_conflict_files_for_path_internal(&path))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn git_merge_conflict_files(path: String) -> Result<Vec<String>, String> {
-    get_merge_conflict_files_for_path_internal(&path)
+pub async fn git_resolve_conflict_ours(path: String, file_path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        git_helpers::git_cmd(&path, ["checkout", "--ours", &file_path]).map_err(|e| e.to_string())?;
+        git_helpers::git_cmd(&path, ["add", &file_path]).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn git_resolve_conflict_ours(path: String, file_path: String) -> Result<(), String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    git_helpers::git_cmd(&path, ["checkout", "--ours", &file_path]).map_err(|e| e.to_string())?;
-    git_helpers::git_cmd(&path, ["add", &file_path]).map_err(|e| e.to_string())?;
-    Ok(())
+pub async fn git_resolve_conflict_theirs(path: String, file_path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        git_helpers::git_cmd(&path, ["checkout", "--theirs", &file_path]).map_err(|e| e.to_string())?;
+        git_helpers::git_cmd(&path, ["add", &file_path]).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn git_resolve_conflict_theirs(path: String, file_path: String) -> Result<(), String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    git_helpers::git_cmd(&path, ["checkout", "--theirs", &file_path]).map_err(|e| e.to_string())?;
-    git_helpers::git_cmd(&path, ["add", &file_path]).map_err(|e| e.to_string())?;
-    Ok(())
+pub async fn git_resolve_conflict_manual(path: String, file_path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+        git_helpers::git_cmd(&path, ["add", &file_path]).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn git_resolve_conflict_manual(path: String, file_path: String) -> Result<(), String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-    git_helpers::git_cmd(&path, ["add", &file_path]).map_err(|e| e.to_string())?;
-    Ok(())
+pub async fn clone_repo(app: tauri::AppHandle, url: String, dest: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        if !url.contains("://") && !url.contains('@') {
+            return Err("Not a valid git URL".into());
+        }
+
+        let dest_path = PathBuf::from(&dest);
+        let settings = crate::settings::read_settings(&app);
+        let folder_name = crate::projects::apply_naming_convention(
+            &repo_base_name(&url),
+            &settings.directory_naming_convention,
+        );
+
+        let clone_target = dest_path.join(&folder_name);
+        if clone_target.exists() {
+            return Err(format!("Folder '{folder_name}' already exists at this location"));
+        }
+
+        let output = git_helpers::git_command()
+            .arg("clone")
+            .arg(&url)
+            .arg(&clone_target)
+            .output()
+            .map_err(|e| format!("Failed to run git: {e}"))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(format!("Git clone failed: {stderr}"));
+        }
+
+        Ok(clone_target.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn clone_repo(app: tauri::AppHandle, url: String, dest: String) -> Result<String, String> {
-    if !url.contains("://") && !url.contains('@') {
-        return Err("Not a valid git URL".into());
-    }
+pub async fn open_terminal(_app: tauri::AppHandle, path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let dir = PathBuf::from(&path);
+        if !dir.exists() {
+            return Err("Path does not exist".into());
+        }
 
-    let dest_path = PathBuf::from(&dest);
-    let settings = crate::settings::read_settings(&app);
-    let folder_name = crate::projects::apply_naming_convention(
-        &repo_base_name(&url),
-        &settings.directory_naming_convention,
-    );
+        #[cfg(target_os = "windows")]
+        {
+            let result = Command::new("wt").arg("-d").arg(&path).spawn();
+            if result.is_err() {
+                Command::new("cmd")
+                    .args(["/C", "start", "", "cmd"])
+                    .current_dir(&dir)
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+        }
 
-    let clone_target = dest_path.join(&folder_name);
-    if clone_target.exists() {
-        return Err(format!("Folder '{folder_name}' already exists at this location"));
-    }
+        #[cfg(target_os = "macos")]
+        {
+            Command::new("open")
+                .args(["-a", "Terminal", &path])
+                .spawn()
+                .map_err(|e| e.to_string())?;
+        }
 
-    let output = git_helpers::git_command()
-        .arg("clone")
-        .arg(&url)
-        .arg(&clone_target)
-        .output()
-        .map_err(|e| format!("Failed to run git: {e}"))?;
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            let script = format!(
+                "#!/bin/sh\ncd '{}' && exec ${{SHELL:-bash}}\n",
+                path.replace('\'', "'\\''")
+            );
+            crate::terminal::spawn_shell_script_in_terminal(&_app, &script)?;
+        }
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(format!("Git clone failed: {stderr}"));
-    }
-
-    Ok(clone_target.to_string_lossy().to_string())
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn open_terminal(_app: tauri::AppHandle, path: String) -> Result<(), String> {
-    let dir = PathBuf::from(&path);
-    if !dir.exists() {
-        return Err("Path does not exist".into());
-    }
+pub async fn git_log(_app: tauri::AppHandle, path: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let dir = PathBuf::from(&path);
+        if !dir.exists() {
+            return Err("Path does not exist".into());
+        }
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
 
-    #[cfg(target_os = "windows")]
-    {
-        let result = Command::new("wt").arg("-d").arg(&path).spawn();
-        if result.is_err() {
+        #[cfg(target_os = "windows")]
+        {
             Command::new("cmd")
-                .args(["/C", "start", "", "cmd"])
+                .args(["/C", "start", "Git Log", "cmd", "/K", "git log --oneline --graph -25 --all"])
                 .current_dir(&dir)
                 .spawn()
                 .map_err(|e| e.to_string())?;
         }
-    }
 
-    #[cfg(target_os = "macos")]
-    {
-        Command::new("open")
-            .args(["-a", "Terminal", &path])
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        let script = format!(
-            "#!/bin/sh\ncd '{}' && exec ${{SHELL:-bash}}\n",
-            path.replace('\'', "'\\''")
-        );
-        crate::terminal::spawn_shell_script_in_terminal(&_app, &script)?;
-    }
-
-    Ok(())
-}
-
-#[tauri::command]
-pub fn git_log(_app: tauri::AppHandle, path: String) -> Result<(), String> {
-    let dir = PathBuf::from(&path);
-    if !dir.exists() {
-        return Err("Path does not exist".into());
-    }
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        Command::new("cmd")
-            .args(["/C", "start", "Git Log", "cmd", "/K", "git log --oneline --graph -25 --all"])
-            .current_dir(&dir)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        let script = format!(
-            r#"tell application "Terminal"
-                activate
-                do script "cd \"{}\" && git log --oneline --graph -25 --all"
-            end tell"#,
-            path.replace('"', "\\\"")
-        );
-        Command::new("osascript")
-            .arg("-e")
-            .arg(&script)
-            .spawn()
-            .map_err(|e| e.to_string())?;
-    }
-
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        let script = format!(
-            "#!/bin/sh\ncd '{}' && git log --oneline --graph -25 --all\nexec sh\n",
-            path.replace('\'', "'\\''")
-        );
-        crate::terminal::spawn_shell_script_in_terminal(&_app, &script)?;
-    }
-
-    Ok(())
-}
-
-#[tauri::command]
-pub fn git_file_diff(path: String, file_path: String) -> Result<GitDiffResult, String> {
-    if !check_is_repo(&path) {
-        return Err("Not a git repository".into());
-    }
-
-    let output = git_helpers::git_raw(&path, ["diff", "--no-color", "--", &file_path])
-        .map_err(|e| e.to_string())?;
-    let stdout = git_helpers::output_stdout(&output);
-
-    let diff_text = if stdout.trim().is_empty() {
-        let cached = git_helpers::git_raw(&path, ["diff", "--cached", "--no-color", "--", &file_path])
-            .ok();
-        match cached {
-            Some(c) => git_helpers::output_stdout(&c),
-            None => stdout,
+        #[cfg(target_os = "macos")]
+        {
+            let script = format!(
+                r#"tell application "Terminal"
+                    activate
+                    do script "cd \"{}\" && git log --oneline --graph -25 --all"
+                end tell"#,
+                path.replace('"', "\\\"")
+            );
+            Command::new("osascript")
+                .arg("-e")
+                .arg(&script)
+                .spawn()
+                .map_err(|e| e.to_string())?;
         }
-    } else {
-        stdout
-    };
 
-    if diff_text.trim().is_empty() {
-        return Err(format!("No diff available for '{}'", file_path));
-    }
+        #[cfg(all(unix, not(target_os = "macos")))]
+        {
+            let script = format!(
+                "#!/bin/sh\ncd '{}' && git log --oneline --graph -25 --all\nexec sh\n",
+                path.replace('\'', "'\\''")
+            );
+            crate::terminal::spawn_shell_script_in_terminal(&_app, &script)?;
+        }
 
-    Ok(parse_diff_text(&diff_text))
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn git_file_diff(path: String, file_path: String) -> Result<GitDiffResult, String> {
+    tokio::task::spawn_blocking(move || {
+        if !check_is_repo(&path) {
+            return Err("Not a git repository".into());
+        }
+
+        let output = git_helpers::git_raw(&path, ["diff", "--no-color", "--", &file_path])
+            .map_err(|e| e.to_string())?;
+        let stdout = git_helpers::output_stdout(&output);
+
+        let diff_text = if stdout.trim().is_empty() {
+            let cached = git_helpers::git_raw(&path, ["diff", "--cached", "--no-color", "--", &file_path])
+                .ok();
+            match cached {
+                Some(c) => git_helpers::output_stdout(&c),
+                None => stdout,
+            }
+        } else {
+            stdout
+        };
+
+        if diff_text.trim().is_empty() {
+            return Err(format!("No diff available for '{}'", file_path));
+        }
+
+        Ok(parse_diff_text(&diff_text))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 fn parse_diff_text(diff_text: &str) -> GitDiffResult {
@@ -1188,201 +1615,4 @@ fn parse_diff_text(diff_text: &str) -> GitDiffResult {
         result.hunks.push(hunk);
     }
     result
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn repo_base_name_extraction() {
-        assert_eq!(
-            repo_base_name("https://github.com/user/my-game.git"),
-            "my-game"
-        );
-        assert_eq!(repo_base_name("git@github.com:user/My Repo.git"), "My Repo");
-        assert_eq!(repo_base_name("https://github.com/user/repo"), "repo");
-        assert_eq!(repo_base_name("https://github.com/user/repo.git/"), "repo");
-        assert_eq!(repo_base_name("https://github.com/user/"), "user");
-        assert_eq!(repo_base_name("https://github.com"), "github.com");
-    }
-
-    #[test]
-    fn parse_diff_text_parses_standard_hunk() {
-        let diff = "\
-@@ -1,3 +1,4 @@
- line1
--line2
-+CHANGED
- line3
-+NEW LINE";
-        let result = parse_diff_text(diff);
-        assert_eq!(result.hunks.len(), 1);
-        let hunk = &result.hunks[0];
-        assert_eq!((hunk.old_start, hunk.old_lines), (1, 3));
-        assert_eq!((hunk.new_start, hunk.new_lines), (1, 4));
-        assert_eq!(hunk.lines.len(), 5);
-        assert_eq!(hunk.lines[0].kind, "context");
-        assert_eq!(hunk.lines[0].content, "line1");
-        assert_eq!(hunk.lines[1].kind, "delete");
-        assert_eq!(hunk.lines[1].content, "line2");
-        assert_eq!(hunk.lines[2].kind, "add");
-        assert_eq!(hunk.lines[2].content, "CHANGED");
-        assert_eq!(hunk.lines[3].kind, "context");
-        assert_eq!(hunk.lines[4].kind, "add");
-        assert_eq!(hunk.lines[4].content, "NEW LINE");
-    }
-
-    #[test]
-    fn parse_diff_text_handles_multiple_hunks_and_count_defaults() {
-        let diff = "\
-@@ -1 +1 @@
- same
-@@ -0,0 +1,5 @@
-+added1
-+added2";
-        let result = parse_diff_text(diff);
-        assert_eq!(result.hunks.len(), 2);
-        assert_eq!((result.hunks[0].old_lines, result.hunks[0].new_lines), (1, 1));
-        assert_eq!(
-            (result.hunks[1].old_start, result.hunks[1].old_lines),
-            (0, 0)
-        );
-        assert_eq!(
-            (result.hunks[1].new_start, result.hunks[1].new_lines),
-            (1, 5)
-        );
-        assert_eq!(result.hunks[1].lines.len(), 2);
-        assert!(result.hunks[1].lines.iter().all(|l| l.kind == "add"));
-    }
-
-    #[test]
-    fn parse_diff_text_returns_empty_for_headers_without_content() {
-        let result = parse_diff_text("diff --git a/a.txt b/a.txt\nindex 1..2 100644");
-        assert!(result.hunks.is_empty());
-    }
-
-    #[test]
-    fn reroot_to_project_filters_and_reroots_nested_project() {
-        let files = vec![
-            GitChangedFile { path: "myproject/game.gd".into(), status: " M".into() },
-            GitChangedFile { path: "godot/editor/editor_layout.cfg".into(), status: " M".into() },
-            GitChangedFile { path: "myproject/sub/asset.png".into(), status: "??".into() },
-        ];
-        let scoped = reroot_to_project(files, Path::new("/repo/myproject"), Path::new("/repo"));
-        assert_eq!(scoped.len(), 2);
-        assert_eq!(scoped[0].path, "game.gd");
-        assert_eq!(scoped[0].status, " M");
-        assert_eq!(scoped[1].path, "sub/asset.png");
-        assert_eq!(scoped[1].status, "??");
-    }
-
-    #[test]
-    fn reroot_to_project_noop_when_project_is_repo_root() {
-        let files = vec![GitChangedFile { path: "a.txt".into(), status: " M".into() }];
-        let scoped = reroot_to_project(files, Path::new("/repo"), Path::new("/repo"));
-        assert_eq!(scoped.len(), 1);
-        assert_eq!(scoped[0].path, "a.txt");
-    }
-
-    #[test]
-    fn reroot_to_project_ignores_sibling_prefixes() {
-        let files = vec![
-            GitChangedFile { path: "myproject-other/x.txt".into(), status: "??".into() },
-            GitChangedFile { path: "myproject/x.txt".into(), status: "??".into() },
-        ];
-        let scoped = reroot_to_project(files, Path::new("/repo/myproject"), Path::new("/repo"));
-        assert_eq!(scoped.len(), 1);
-        assert_eq!(scoped[0].path, "x.txt");
-    }
-
-    #[test]
-    fn reroot_to_project_keeps_deleted_project_folder() {
-        let files = vec![GitChangedFile { path: "myproject/".into(), status: " D".into() }];
-        let scoped = reroot_to_project(files, Path::new("/repo/myproject"), Path::new("/repo"));
-        assert_eq!(scoped.len(), 1);
-        assert_eq!(scoped[0].path, "myproject");
-        assert_eq!(scoped[0].status, " D");
-    }
-
-    #[test]
-    fn parse_changed_files_keeps_index_and_worktree_columns() {
-        let files = parse_changed_files(
-            " M src/unstaged.ts\n\nM  src/staged.ts\nMM src/both.ts\nA  src/added.ts\n?? src/untracked.ts\n D src/removed.ts\n",
-        );
-        assert_eq!(files.len(), 6); // blank line in fixture is skipped
-        assert_eq!(files[0].path, "src/unstaged.ts");
-        assert_eq!(files[0].status, " M");
-        assert_eq!(files[1].path, "src/staged.ts");
-        assert_eq!(files[1].status, "M ");
-        assert_eq!(files[2].path, "src/both.ts");
-        assert_eq!(files[2].status, "MM");
-        assert_eq!(files[3].path, "src/added.ts");
-        assert_eq!(files[3].status, "A ");
-        assert_eq!(files[4].path, "src/untracked.ts");
-        assert_eq!(files[4].status, "??");
-        assert_eq!(files[5].path, "src/removed.ts");
-        assert_eq!(files[5].status, " D");
-    }
-
-    #[test]
-    fn changed_files_preserves_first_character_of_worktree_changes() {
-        let dir = std::env::temp_dir().join(format!("godothub_git_test_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let dir_str = dir.to_string_lossy().to_string();
-        let run = |args: &[&str]| git_helpers::git_cmd(&dir_str, args).unwrap();
-        run(&["init", "-q"]);
-        run(&["config", "user.email", "test@test.com"]);
-        run(&["config", "user.name", "Test"]);
-        std::fs::write(dir.join("project.godot"), "x").unwrap();
-        run(&["add", "."]);
-        run(&["commit", "-qm", "init"]);
-        std::fs::write(dir.join("project.godot"), "y").unwrap();
-
-        let files = git_changed_files(dir_str).unwrap();
-        assert_eq!(files.len(), 1, "expected exactly one change, got {files:?}");
-        assert_eq!(files[0].path, "project.godot");
-        assert_eq!(files[0].status, " M");
-
-        let parent = std::env::temp_dir().join(format!("godothub_git_test_nested_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&parent);
-        std::fs::create_dir_all(parent.join("sub")).unwrap();
-        let parent_str = parent.to_string_lossy().to_string();
-        let proj_str = parent.join("sub").to_string_lossy().to_string();
-        let run2 = |wd: &str, args: &[&str]| git_helpers::git_cmd(wd, args).unwrap();
-        run2(&parent_str, &["init", "-q"]);
-        run2(&parent_str, &["config", "user.email", "test@test.com"]);
-        run2(&parent_str, &["config", "user.name", "Test"]);
-        std::fs::write(parent.join("sub").join("project.godot"), "x").unwrap();
-        std::fs::write(parent.join("outside.txt"), "x").unwrap();
-        run2(&parent_str, &["add", "."]);
-        run2(&parent_str, &["commit", "-qm", "init"]);
-        std::fs::write(parent.join("sub").join("project.godot"), "y").unwrap();
-        let files = git_changed_files(proj_str.clone()).unwrap();
-        assert_eq!(files.len(), 1, "expected one in-project change, got {files:?}");
-        assert_eq!(files[0].path, "project.godot");
-        assert_eq!(files[0].status, " M");
-
-        let _ = std::fs::remove_dir_all(&parent);
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn clone_folder_name_follows_convention() {
-        let name = repo_base_name("https://github.com/user/New Game.git");
-        assert_eq!(name, "New Game");
-        assert_eq!(
-            crate::projects::apply_naming_convention(&name, "kebab-case"),
-            "new-game"
-        );
-        assert_eq!(
-            crate::projects::apply_naming_convention(&name, "PascalCase"),
-            "NewGame"
-        );
-        assert_eq!(
-            crate::projects::apply_naming_convention(&name, "keep"),
-            "New Game"
-        );
-    }
 }

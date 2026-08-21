@@ -1,11 +1,14 @@
+import { invoke } from '@tauri-apps/api/core'
 import { projectsApi, getCachedProjectIcon, getCachedProjectName } from '../api/projects'
 import { versionsApi } from '../api/versions'
 import { gitApi } from '../api/git'
+import { gitAuthApi } from '../api/gitAuth'
 import { settingsApi } from '../api/settings'
 import { templatesApi } from '../api/templates'
 import { categoriesApi } from '../api/categories'
 import { workspacesApi } from '../api/workspaces'
 import { changelogApi } from '../api/changelog'
+import { updatesApi } from '../api/updates'
 import { newsApi } from '../api/news'
 import { assetLibraryApi } from '../api/assetLibrary'
 
@@ -21,11 +24,32 @@ export const api = {
   saveProjectTags: projectsApi.saveTags,
   openProject: projectsApi.open,
   stopProject: projectsApi.stop,
+  listRunningProjects: () =>
+    invoke<{ id: string; name: string; version: string; launched_at_ms: number }[]>(
+      'list_running_projects',
+    ),
   openProjectFolder: projectsApi.openFolder,
   openInEditor: projectsApi.openInEditor,
   getProjectSize: projectsApi.getSize,
   pickFolder: projectsApi.pickFolder,
   pickFile: projectsApi.pickFile,
+  pickSavePath: projectsApi.pickSavePath,
+  pickDataFile: projectsApi.pickDataFile,
+  getOsUsername: settingsApi.getOsUsername,
+  exportWorkspaceBackup: settingsApi.exportWorkspaceBackup,
+  importWorkspaceBackup: settingsApi.importWorkspaceBackup,
+  exportAppBackup: settingsApi.exportAppBackup,
+  importAppBackup: settingsApi.importAppBackup,
+  gistSyncPush: settingsApi.gistSyncPush,
+  gistSyncPull: settingsApi.gistSyncPull,
+  getTimeInsights: settingsApi.getTimeInsights,
+  exportProjectStats: projectsApi.exportProjectStats,
+  importProjectStats: projectsApi.importProjectStats,
+  clearTimeStats: projectsApi.clearTimeStats,
+  getActivity: (range: 'daily' | 'weekly' | 'monthly' | 'yearly') =>
+    invoke<[string, number][]>('get_activity', { range }),
+  getProjectActivity: (projectId: string) =>
+    invoke<[string, number][]>('get_project_activity', { projectId }),
   readImageFile: projectsApi.readImageFile,
   getProjectIcon: projectsApi.getIcon,
   getProjectName: projectsApi.getName,
@@ -33,10 +57,12 @@ export const api = {
   clearProjectIconCache: projectsApi.clearIconCache,
   clearProjectNameCache: projectsApi.clearNameCache,
 
-  fetchAvailableGodotVersions: versionsApi.fetchAvailable,
+  fetchAvailableGodotVersions: (source?: string) =>
+    versionsApi.fetchAvailable(source),
   downloadGodotVersion: versionsApi.download,
   pauseDownload: versionsApi.pauseDownload,
   resumeDownload: versionsApi.resumeDownload,
+  reorderDownloadQueue: versionsApi.reorderDownloadQueue,
   cancelDownload: versionsApi.cancelDownload,
   listInstalledGodotVersions: versionsApi.listInstalled,
   renameGodotVersion: versionsApi.rename,
@@ -59,17 +85,26 @@ export const api = {
   gitPushForce: gitApi.pushForce,
   gitLog: gitApi.log,
   gitLogEntries: gitApi.logEntries,
+  gitListRemotes: gitApi.listRemotes,
+  gitAheadBehind: gitApi.aheadBehind,
+  gitShowCommit: gitApi.showCommit,
+  gitStartFsWatcher: gitApi.startFsWatcher,
+  gitStopFsWatcher: gitApi.stopFsWatcher,
   gitRemoteUrl: gitApi.remoteUrl,
   gitListBranches: gitApi.listBranches,
   gitSwitchBranch: gitApi.switchBranch,
+  gitBranchPublish: gitApi.branchPublish,
   gitCreateBranch: gitApi.createBranch,
   gitDeleteBranch: gitApi.deleteBranch,
   gitStashPush: gitApi.stashPush,
   gitStashList: gitApi.stashList,
   gitStashApply: gitApi.stashApply,
+  gitStashShow: gitApi.stashShow,
+  gitStashPop: gitApi.stashPop,
   gitStashDrop: gitApi.stashDrop,
   gitChangedFiles: gitApi.changedFiles,
   gitDiscardChanges: gitApi.discardChanges,
+  gitDiscardFile: gitApi.discardFile,
   gitInit: gitApi.init,
   gitInitProject: gitApi.initProject,
   gitIsAvailable: gitApi.isAvailable,
@@ -88,9 +123,20 @@ export const api = {
   gitAbortMerge: gitApi.abortMerge,
   gitIsMerging: gitApi.isMerging,
 
+  gitAuthGetState: gitAuthApi.getState,
+  gitAuthCreateRemoteRepo: gitAuthApi.createRemoteRepo,
+  gitAuthStartDeviceFlow: gitAuthApi.startDeviceFlow,
+  gitAuthPollDeviceFlow: gitAuthApi.pollDeviceFlow,
+  gitAuthDisconnect: gitAuthApi.disconnect,
+  gitAuthSavePat: gitAuthApi.savePat,
+  gitAuthRemovePat: gitAuthApi.removePat,
+  gitAuthListUserRepos: gitAuthApi.listUserRepos,
+
   getSettings: settingsApi.get,
   updateSettings: settingsApi.update,
   resetSettings: settingsApi.reset,
+  exportSettings: settingsApi.exportSettings,
+  importSettings: settingsApi.importSettings,
   resetAppData: settingsApi.resetData,
   scanForProjects: settingsApi.scanForProjects,
   scanForProjectsWithInfo: settingsApi.scanForProjectsWithInfo,
@@ -121,6 +167,11 @@ export const api = {
   addChangelogEntry: changelogApi.add,
   updateChangelogEntry: changelogApi.update,
   deleteChangelogEntry: changelogApi.delete,
+  listGitTags: changelogApi.listGitTags,
+  generateChangelogDraft: changelogApi.generateDraft,
+
+  fetchUpdates: updatesApi.fetch,
+  isPortableInstall: updatesApi.isPortableInstall,
 
   fetchGodotNews: newsApi.fetch,
 

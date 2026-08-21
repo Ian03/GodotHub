@@ -2,20 +2,26 @@ use crate::error::AppResult;
 use crate::persist;
 use crate::models::*;
 use crate::projects;
-use std::path::PathBuf;
 use tauri::AppHandle;
 use uuid::Uuid;
 
-fn categories_file(app: &AppHandle) -> PathBuf {
-    crate::workspace::active_workspace_dir(app).join("categories.json")
+pub(crate) fn read_categories_from(dir: &std::path::Path) -> Vec<Category> {
+    persist::read_json(&dir.join("categories.json"))
 }
 
-fn read_categories(app: &AppHandle) -> Vec<Category> {
-    persist::read_json(&categories_file(app))
+pub(crate) fn read_categories(app: &AppHandle) -> Vec<Category> {
+    read_categories_from(&crate::workspace::active_workspace_dir(app))
 }
 
-fn write_categories(app: &AppHandle, categories: &Vec<Category>) -> AppResult<()> {
-    persist::write_json(&categories_file(app), categories)
+pub(crate) fn write_categories_to(
+    dir: &std::path::Path,
+    categories: &Vec<Category>,
+) -> AppResult<()> {
+    persist::write_json(&dir.join("categories.json"), categories)
+}
+
+pub(crate) fn write_categories(app: &AppHandle, categories: &Vec<Category>) -> AppResult<()> {
+    write_categories_to(&crate::workspace::active_workspace_dir(app), categories)
 }
 
 #[tauri::command]
@@ -41,7 +47,7 @@ pub fn create_category(app: AppHandle, name: String, color: Option<String>) -> R
         .max()
         .map(|m| m + 1)
         .unwrap_or(0);
-    let effective_color = color.unwrap_or_else(|| "#457ff2".to_string());
+    let effective_color = color.unwrap_or_else(default_accent);
     let category = Category {
         id: Uuid::new_v4().to_string(),
         name: trimmed,
