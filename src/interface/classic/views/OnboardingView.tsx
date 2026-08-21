@@ -40,7 +40,7 @@ import {
   IconChevronDown,
 } from '../lib/Icons'
 import type { AppSettings } from '../../../types'
-import { LANGUAGES } from '../../i18n/languages'
+import { LANGUAGES } from '../../../i18n/languages'
 
 interface Props {
   settings: AppSettings
