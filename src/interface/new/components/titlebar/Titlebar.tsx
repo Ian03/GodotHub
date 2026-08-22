@@ -67,9 +67,6 @@ export function Titlebar({ minimal = false }: { minimal?: boolean }) {
 
   const noDrag = (e: React.MouseEvent) => e.stopPropagation()
 
-  const windowDot =
-    'w-4.5 h-4.5 rounded-xl transition-[filter] duration-150 group-hover/win:brightness-125'
-
   return (
     <header
       data-tauri-drag-region
@@ -144,7 +141,7 @@ export function Titlebar({ minimal = false }: { minimal?: boolean }) {
         {showWindowControls && (
           <>
             <div className="w-px h-5 bg-line/40 mx-1 shrink-0" />
-            <div className="flex self-stretch">
+            <div className="flex self-stretch items-stretch">
               <Tooltip
                 className="self-stretch flex"
                 content={t('minimize')}
@@ -155,14 +152,11 @@ export function Titlebar({ minimal = false }: { minimal?: boolean }) {
                   onMouseDown={noDrag}
                   onClick={() => safe((w) => w.minimize())}
                   aria-label={t('minimize')}
-                  className="focus-ring cursor-pointer group/win w-9 h-full flex items-center justify-center"
+                  className="focus-ring window-control"
                 >
-                  <motion.span
-                    whileHover={{ scale: 1.12 }}
-                    whileTap={{ scale: 0.9 }}
-                    transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                    className={`${windowDot} -mr-3 bg-mint`}
-                  />
+                  <svg aria-hidden="true" viewBox="0 0 10 10" className="window-control-icon">
+                    <path d="M1 5h8" />
+                  </svg>
                 </button>
               </Tooltip>
 
@@ -176,14 +170,17 @@ export function Titlebar({ minimal = false }: { minimal?: boolean }) {
                   onMouseDown={noDrag}
                   onClick={() => safe((w) => w.toggleMaximize())}
                   aria-label={isMaximized ? t('restore') : t('maximize')}
-                  className="focus-ring cursor-pointer group/win w-9 h-full flex items-center justify-center"
+                  className="focus-ring window-control"
                 >
-                  <motion.span
-                    whileHover={{ scale: 1.12 }}
-                    whileTap={{ scale: 0.9 }}
-                    transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                    className={`${windowDot} bg-amber`}
-                  />
+                  {isMaximized ? (
+                    <svg aria-hidden="true" viewBox="0 0 10 10" className="window-control-icon">
+                      <path d="M3 1h6v6M3 3H1v6h6V7" />
+                    </svg>
+                  ) : (
+                    <svg aria-hidden="true" viewBox="0 0 10 10" className="window-control-icon">
+                      <rect x="1.5" y="1.5" width="7" height="7" />
+                    </svg>
+                  )}
                 </button>
               </Tooltip>
 
@@ -197,14 +194,11 @@ export function Titlebar({ minimal = false }: { minimal?: boolean }) {
                   onMouseDown={noDrag}
                   onClick={() => safe((w) => w.close())}
                   aria-label={t('close')}
-                  className="focus-ring cursor-pointer group/win w-9 h-full flex items-center justify-center"
+                  className="focus-ring window-control window-control-close"
                 >
-                  <motion.span
-                    whileHover={{ scale: 1.12 }}
-                    whileTap={{ scale: 0.9 }}
-                    transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                    className={`${windowDot} mr-3 bg-danger`}
-                  />
+                  <svg aria-hidden="true" viewBox="0 0 10 10" className="window-control-icon">
+                    <path d="m1.5 1.5 7 7m0-7-7 7" />
+                  </svg>
                 </button>
               </Tooltip>
             </div>
